@@ -1,0 +1,69 @@
+{
+  "_lang": { "code": "ja", "name": "日本語" },
+
+  "loading": "読み込み中…",
+  "connecting": "接続中…",
+
+  "brand.name": "AudioRemote",
+
+  "tokenEntry.hint": "ホストの HTTP サーバーで発行されたトークンを貼り付けてください。",
+  "tokenEntry.button": "接続",
+
+  "header.lanExposed": "LAN 露出中",
+  "header.settingsTitle": "設定",
+
+  "meta.line": "ホスト {bind}:{port} / 並び: {sort} / 3 秒ごとに更新",
+
+  "sort.state": "状態順",
+  "sort.name": "名前順",
+  "sort.recent": "最近使った順",
+
+  "share.title": "他のマシンから開く",
+  "share.hint": "この URL をゲスト Win11 / スマホ / VM のブラウザで開くと、そのままログイン済みで使えます。",
+  "share.copy": "コピー",
+  "share.copied": "コピー済み",
+  "share.copyFailed": "コピー失敗",
+  "share.virtualSwitch": "（仮想スイッチ）",
+
+  "devices.applying": "適用中…",
+  "devices.footerNote": "タップで Console / Multimedia / Communications をまとめて切替。",
+  "devices.showInactive": "他 {count} 個 (unplugged / disabled) を表示",
+  "devices.hideInactive": "非アクティブを隠す",
+
+  "deviceState.active": "active",
+  "deviceState.unplugged": "未接続",
+  "deviceState.disabled": "無効",
+  "deviceState.not_present": "未検出",
+  "deviceState.unknown": "不明",
+
+  "roles.default_prefix": "既定: ",
+  "roles.console": "Console",
+  "roles.multimedia": "Multimedia",
+  "roles.communications": "Comms",
+
+  "settings.title": "設定",
+  "settings.server": "サーバー",
+  "settings.version": "バージョン",
+  "settings.sort": "並び順",
+  "settings.token": "トークン",
+  "settings.lanExposed": "LAN 露出",
+  "settings.lanExposed.yes": "はい",
+  "settings.lanExposed.no": "いいえ (localhost)",
+  "settings.language": "言語",
+  "settings.about": "このアプリについて",
+  "settings.aboutOpen": "表示",
+  "settings.close": "閉じる",
+  "settings.reissueToken": "トークンを入れ直す",
+  "settings.tokenEmpty": "(未設定)",
+
+  "settings.reissueConfirm": "トークンを削除して入力画面に戻ります。よろしいですか?",
+
+  "about.title": "このアプリについて",
+  "about.versionRow": "バージョン v{version} / 実行環境: Windows 11 単独",
+  "about.licenseSection": "アプリのライセンス",
+  "about.licenseBody": "{name} は {license} License で配布しています。 Copyright (c) {copyright}.",
+  "about.frontendSection": "フロントエンド",
+  "about.ossSection": "同梱しているオープンソースソフトウェア（Rust crates · {count} 個）",
+
+  "toast.switchFailed": "切替に失敗: {msg}"
+}

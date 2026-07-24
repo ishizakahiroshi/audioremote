@@ -1,0 +1,69 @@
+{
+  "_lang": { "code": "en", "name": "English" },
+
+  "loading": "Loading…",
+  "connecting": "Connecting…",
+
+  "brand.name": "AudioRemote",
+
+  "tokenEntry.hint": "Paste the token issued by the host's HTTP server.",
+  "tokenEntry.button": "Connect",
+
+  "header.lanExposed": "LAN exposed",
+  "header.settingsTitle": "Settings",
+
+  "meta.line": "Host {bind}:{port} · sort: {sort} · refresh every 3s",
+
+  "sort.state": "by status",
+  "sort.name": "by name",
+  "sort.recent": "recently used",
+
+  "share.title": "Open on another machine",
+  "share.hint": "Opening this URL on a guest Win11 / phone / VM browser signs you in automatically.",
+  "share.copy": "Copy",
+  "share.copied": "Copied",
+  "share.copyFailed": "Copy failed",
+  "share.virtualSwitch": " (virtual switch)",
+
+  "devices.applying": "Applying…",
+  "devices.footerNote": "Tap to switch Console / Multimedia / Communications together.",
+  "devices.showInactive": "Show {count} more (unplugged / disabled)",
+  "devices.hideInactive": "Hide inactive",
+
+  "deviceState.active": "active",
+  "deviceState.unplugged": "unplugged",
+  "deviceState.disabled": "disabled",
+  "deviceState.not_present": "not present",
+  "deviceState.unknown": "unknown",
+
+  "roles.default_prefix": "default: ",
+  "roles.console": "Console",
+  "roles.multimedia": "Multimedia",
+  "roles.communications": "Comms",
+
+  "settings.title": "Settings",
+  "settings.server": "Server",
+  "settings.version": "Version",
+  "settings.sort": "Sort order",
+  "settings.token": "Token",
+  "settings.lanExposed": "LAN exposed",
+  "settings.lanExposed.yes": "yes",
+  "settings.lanExposed.no": "no (localhost)",
+  "settings.language": "Language",
+  "settings.about": "About this app",
+  "settings.aboutOpen": "Open",
+  "settings.close": "Close",
+  "settings.reissueToken": "Re-enter token",
+  "settings.tokenEmpty": "(unset)",
+
+  "settings.reissueConfirm": "Delete the token and return to the entry screen. Continue?",
+
+  "about.title": "About this app",
+  "about.versionRow": "Version v{version} · runtime: Windows 11 only",
+  "about.licenseSection": "License",
+  "about.licenseBody": "{name} is distributed under the {license} License. Copyright (c) {copyright}.",
+  "about.frontendSection": "Frontend",
+  "about.ossSection": "Bundled open-source software (Rust crates · {count})",
+
+  "toast.switchFailed": "Switch failed: {msg}"
+}
