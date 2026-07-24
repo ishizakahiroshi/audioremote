@@ -26,6 +26,7 @@ toml = "0.8"
 getrandom = "0.2"
 rust-embed = "8"
 local-ip-address = "0.6"
+ipnet = "2"
 
 [build-dependencies]
 cargo_metadata = "0.19"

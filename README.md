@@ -22,7 +22,7 @@ Physical devices (Nest Hub Max / wired earphones / headphones / …)
 ```
 
 - The server runs in **your physical console session** (not as a SYSTEM service, and not inside an RDP session — audio endpoints belong to the interactive user's physical session; from an RDP session you only see the virtual "Remote Audio" endpoint).
-- Default bind is **`127.0.0.1:17650`** (safe by default). Open to LAN via `config.toml` when you actually need remote control.
+- Default bind is **`0.0.0.0:17650`** — exposed to the LAN out of the box, because controlling the host from another machine is the whole point. Non-loopback clients require a bearer token; loopback (the host itself) is bypassed. Lock it down to `127.0.0.1` with `audioremote setup` if you don't need remote control.
 - Console / Multimedia / Communications default endpoints are always **switched together** (otherwise meeting apps still route to the old device via the Communications default).
 - Switching is done by **device ID**, not display name (display names change on reconnect).
 
@@ -71,12 +71,19 @@ Config lives at `%APPDATA%\audioremote\config.toml` (created automatically on fi
 
 ```toml
 [server]
-bind = "127.0.0.1"   # "0.0.0.0" to expose to LAN (token required)
+bind = "0.0.0.0"     # LAN-exposed by default; "127.0.0.1" to lock to this host
 port = 17650
+allowed_networks = []   # optional CIDR allowlist, e.g. ["203.0.113.0/24"]; empty = any
 
 [auth]
-token = "ar_live_..."   # auto-generated on first run
 require_token = true
+
+# One or more named bearer tokens (first run generates a "default").
+# Manage with `audioremote token add|revoke|list`.
+[[auth.tokens]]
+name = "default"
+token = "ar_live_..."   # auto-generated on first run
+revoked = false
 
 [audio]
 unify_roles = true      # switch Console / Multimedia / Communications together
@@ -87,8 +94,11 @@ Device usage history (for `device_sort = "recent"`) is stored separately in `%AP
 
 ## Security posture
 
-- Bearer token authentication required by default on all API endpoints.
-- CORS is not wide-open.
+- **Exposed to the LAN by default** (`bind = "0.0.0.0"`). The Windows Firewall prompt on first run is the outer gate; the bearer token is the inner gate. Lock down with `audioremote setup` (bind `127.0.0.1`) if you don't want remote control.
+- Bearer token authentication required for every **non-loopback** client on all API endpoints; loopback (the host itself) is bypassed. Tokens are named and individually revocable — `audioremote token add|revoke|list`.
+- **DNS-rebinding guard**: a request is accepted only when its `Host` header matches loopback or a current LAN IP, so a malicious page whose DNS re-resolves to `127.0.0.1` cannot reach the API.
+- Optional **CIDR allowlist** (`allowed_networks`) refuses non-loopback source IPs outside the listed networks before token checking.
+- No cross-origin (CORS) handler is installed, so browsers block cross-origin **reads** by default. There is no permissive CORS policy — and no custom-header requirement either, so treat cross-origin **writes** as possible and keep the token secret.
 - When bound to LAN, the guest UI shows a **"LAN exposed"** badge as a reminder.
 - No unsigned exe direct-download flow is recommended for end users; use the npm channel to avoid SmartScreen prompts.
 - No HTTPS out of the box in v0.1. Reverse-proxy or manual TLS is left to the operator.

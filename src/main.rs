@@ -25,6 +25,7 @@ fn main() {
         }
         "list" => run_list(),
         "set" => run_set(args.get(2).map(String::as_str)),
+        "token" => run_token(&args),
         "setup" | "--setup" => run_setup(),
         // Bare `audioremote` → serve, honor --no-open if given as first arg
         // (e.g. `audioremote --no-open`).
@@ -51,6 +52,7 @@ fn banner() {
     println!("  audioremote setup         interactive config wizard (bind / token / sort)");
     println!("  audioremote list          list playback endpoints + current defaults");
     println!("  audioremote set <id>      switch default (Console/Multimedia/Communications)");
+    println!("  audioremote token ...     manage LAN tokens (list / add <name> / revoke <name|token>)");
     println!("  audioremote --help        show this help");
     println!();
     println!("Repository: {}", env!("CARGO_PKG_REPOSITORY"));
@@ -90,10 +92,12 @@ fn run_serve(no_open: bool) {
         open_url(&host_url);
     }
 
+    let allowed_hosts = net::build_allowed_hosts(&cfg);
     let state = server::AppState {
         config: Arc::new(cfg),
         history: Arc::new(tokio::sync::Mutex::new(history_state)),
         history_path: Arc::new(history_path),
+        allowed_hosts: Arc::new(allowed_hosts),
     };
 
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -128,12 +132,12 @@ fn print_startup_banner(
     println!("  config      {}", config_path.display());
     println!("  bind        {}:{}", cfg.server.bind, cfg.server.port);
     if generated {
-        println!(
-            "  token       {}   <-- first-run token (saved; not shown again)",
-            cfg.auth.token
-        );
+        if let Some(tok) = cfg.share_token() {
+            println!("  token       {tok}   <-- first-run token (saved; not shown again)");
+        }
     } else {
-        println!("  token       (see config.toml `auth.token`)");
+        let active = cfg.auth.tokens.iter().filter(|t| !t.revoked).count();
+        println!("  token       {active} active   (audioremote token list to view/manage)");
     }
     println!(
         "  device_sort {}",
@@ -145,6 +149,12 @@ fn print_startup_banner(
     );
 
     if cfg.lan_exposed() {
+        if !cfg.auth.require_token {
+            println!();
+            println!("  [WARNING] require_token = false while bound to the LAN — the API is");
+            println!("            OPEN to every machine that can reach this host. Set");
+            println!("            require_token = true (or bind = 127.0.0.1) unless intentional.");
+        }
         if generated {
             println!();
             println!("  [firewall] Windows may prompt to allow audioremote on the LAN — pick");
@@ -220,13 +230,16 @@ fn run_setup() {
     }
     println!();
 
-    // 2. Regenerate token
-    println!("2) Regenerate auth token?");
+    // 2. Reissue token (revokes ALL current tokens, issues one fresh "default")
+    println!("2) Reissue auth token? (revokes ALL current tokens)");
     print!("   Old clients will need the new URL. [y/N]: ");
     std::io::stdout().flush().ok();
     if yes() {
-        cfg.auth.token = config::generate_token();
-        println!("   -> new token: {}", cfg.auth.token);
+        for t in &mut cfg.auth.tokens {
+            t.revoked = true;
+        }
+        let token = config::add_named_token(&mut cfg, "default");
+        println!("   -> new token: {token}");
     }
     println!();
 
@@ -346,6 +359,83 @@ fn run_set(id: Option<&str>) {
     }
 }
 
+#[cfg(windows)]
+fn run_token(args: &[String]) {
+    let sub = args.get(2).map(String::as_str).unwrap_or("list");
+    let path = config::default_config_path();
+    let (mut cfg, _) = match config::load_or_init(&path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cannot load config: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    match sub {
+        "list" => {
+            println!("{:<20} {:<8} {:<12} {}", "name", "state", "created", "token");
+            println!("{}", "-".repeat(96));
+            for t in &cfg.auth.tokens {
+                let st = if t.revoked { "revoked" } else { "active" };
+                let created = if t.created_at == 0 {
+                    "-".to_string()
+                } else {
+                    t.created_at.to_string()
+                };
+                println!(
+                    "{:<20} {:<8} {:<12} {}",
+                    truncate(&t.name, 20),
+                    st,
+                    created,
+                    t.token
+                );
+            }
+        }
+        "add" => {
+            let Some(name) = args.get(3) else {
+                eprintln!("usage: audioremote token add <name>");
+                std::process::exit(2);
+            };
+            let token = config::add_named_token(&mut cfg, name);
+            if let Err(e) = config::save(&path, &cfg) {
+                eprintln!("failed to save config: {e}");
+                std::process::exit(1);
+            }
+            println!("added token '{name}':");
+            println!("  {token}");
+        }
+        "revoke" => {
+            let Some(target) = args.get(3) else {
+                eprintln!("usage: audioremote token revoke <name|token>");
+                std::process::exit(2);
+            };
+            let n = config::revoke_token(&mut cfg, target);
+            if n == 0 {
+                eprintln!("no active token matched '{target}'");
+                std::process::exit(1);
+            }
+            // Never leave the server with zero usable tokens: reissue if the
+            // last active token was just revoked.
+            if !cfg.auth.tokens.iter().any(|t| !t.revoked) {
+                let token = config::add_named_token(&mut cfg, "default");
+                println!("revoked {n}; that was the last active token — issued a new 'default':");
+                println!("  {token}");
+            } else {
+                println!("revoked {n} token(s) matching '{target}'");
+            }
+            if let Err(e) = config::save(&path, &cfg) {
+                eprintln!("failed to save config: {e}");
+                std::process::exit(1);
+            }
+        }
+        other => {
+            eprintln!("unknown token subcommand: {other}");
+            eprintln!("usage: audioremote token [list | add <name> | revoke <name|token>]");
+            std::process::exit(2);
+        }
+    }
+}
+
 #[cfg(not(windows))]
 fn run_serve() {
     eprintln!("audioremote only runs on Windows.");
@@ -363,6 +453,11 @@ fn run_set(_: Option<&str>) {
 }
 #[cfg(not(windows))]
 fn run_setup() {
+    eprintln!("audioremote only runs on Windows.");
+    std::process::exit(1);
+}
+#[cfg(not(windows))]
+fn run_token(_: &[String]) {
     eprintln!("audioremote only runs on Windows.");
     std::process::exit(1);
 }

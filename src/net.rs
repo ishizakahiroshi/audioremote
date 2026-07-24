@@ -2,6 +2,8 @@
 //! standalone module so both `main` (startup banner) and `server` (JSON API)
 //! can use the same logic.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
 use crate::config::Config;
@@ -60,8 +62,10 @@ pub fn build_share_entries(cfg: &Config) -> Vec<ShareEntry> {
     if !cfg.lan_exposed() {
         return Vec::new();
     }
+    let Some(token) = cfg.share_token() else {
+        return Vec::new();
+    };
     let port = cfg.server.port;
-    let token = &cfg.auth.token;
     let mut entries: Vec<ShareEntry> = list_lan_ipv4()
         .into_iter()
         .map(|(iface, ip)| ShareEntry {
@@ -79,4 +83,30 @@ pub fn build_share_entries(cfg: &Config) -> Vec<ShareEntry> {
 /// The URL a user on the host itself should open (loopback, auth bypassed).
 pub fn build_host_url(cfg: &Config) -> String {
     format!("http://127.0.0.1:{}/", cfg.server.port)
+}
+
+/// Host header values accepted by the AR-02 DNS-rebinding guard, built once at
+/// startup: loopback names plus every current LAN IPv4, each as bare host and
+/// `host:port`. A request whose `Host` is outside this set is refused, so an
+/// attacker page whose DNS re-resolves to `127.0.0.1` (rebinding) cannot pass
+/// its own hostname through even though the TCP peer looks like loopback.
+/// Snapshot at startup — a NIC added later needs a restart to be accepted.
+pub fn build_allowed_hosts(cfg: &Config) -> HashSet<String> {
+    let port = cfg.server.port;
+    let mut names = vec![
+        "127.0.0.1".to_string(),
+        "localhost".to_string(),
+        "::1".to_string(),
+        "[::1]".to_string(),
+    ];
+    for (_iface, ip) in list_lan_ipv4() {
+        names.push(ip.to_string());
+    }
+    let mut set = HashSet::new();
+    for name in names {
+        let h = name.to_ascii_lowercase();
+        set.insert(format!("{h}:{port}"));
+        set.insert(h);
+    }
+    set
 }

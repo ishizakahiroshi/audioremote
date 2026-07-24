@@ -1,12 +1,13 @@
 //! HTTP server: 3-endpoint JSON API + bearer-token auth. Web UI (static
 //! assets) is deferred to C4.
 
+use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{ConnectInfo, Path as AxumPath, Request, State};
-use axum::http::{header, HeaderValue, StatusCode, Uri};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
@@ -30,6 +31,9 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub history: Arc<Mutex<History>>,
     pub history_path: Arc<PathBuf>,
+    /// AR-02 rebinding guard: allowed `Host` header values, built once at
+    /// startup from loopback names + current LAN IPs (see `net::build_allowed_hosts`).
+    pub allowed_hosts: Arc<HashSet<String>>,
 }
 
 pub async fn serve(state: AppState) -> Result<(), std::io::Error> {
@@ -81,7 +85,10 @@ struct StatusBody {
     default_communications: Option<String>,
 }
 
-async fn status_handler(State(state): State<AppState>) -> Response {
+async fn status_handler(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Response {
     let devices = match audio::list_devices() {
         Ok(d) => d,
         Err(e) => return audio_error(e),
@@ -96,7 +103,14 @@ async fn status_handler(State(state): State<AppState>) -> Response {
         lan_exposed: state.config.lan_exposed(),
         require_token: state.config.auth.require_token,
         device_sort: state.config.audio.device_sort,
-        share_urls: net::build_share_entries(&state.config),
+        // AR-14: hand the token-bearing share URLs only to loopback (the host
+        // itself). LAN clients already hold a token and don't need every NIC's
+        // URL; withholding them shrinks the token's exposure surface.
+        share_urls: if is_loopback(peer.ip()) {
+            net::build_share_entries(&state.config)
+        } else {
+            Vec::new()
+        },
         default_console: pick(|d| d.is_default_console),
         default_multimedia: pick(|d| d.is_default_multimedia),
         default_communications: pick(|d| d.is_default_communications),
@@ -248,22 +262,45 @@ async fn auth_middleware(
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    let ip = peer.ip();
+    let loopback = is_loopback(ip);
+
+    // AR-04: CIDR allowlist. When `allowed_networks` is non-empty, a
+    // non-loopback peer whose IP is outside every listed network is refused
+    // before anything else. Loopback is always allowed so the host never
+    // locks itself out.
+    if !state.config.server.allowed_networks.is_empty()
+        && !loopback
+        && !ip_in_networks(ip, &state.config.server.allowed_networks)
+    {
+        return Ok((StatusCode::FORBIDDEN, "source address not allowed").into_response());
+    }
+
+    // AR-02: Host header allowlist — defeats DNS rebinding. An attacker page
+    // whose DNS re-resolves to 127.0.0.1 makes the TCP peer look like loopback,
+    // but its request still carries the attacker's own Host, which is not in
+    // the allowlist. Applies to every request, including loopback.
+    if !host_allowed(request.headers(), &state.allowed_hosts) {
+        return Ok((StatusCode::FORBIDDEN, "host not allowed").into_response());
+    }
+
     if !state.config.auth.require_token {
         return Ok(next.run(request).await);
     }
     // Loopback bypass: connections from 127.0.0.1 / ::1 are OS-guaranteed to
-    // originate on the host itself, so requiring a token there just annoys the
-    // user without adding security. LAN clients still need the token.
-    if is_loopback(peer.ip()) {
+    // originate on the host itself. LAN clients still need a token.
+    if loopback {
         return Ok(next.run(request).await);
     }
+    // LAN clients: match any non-revoked token (AR-13 multi-token, AR-08
+    // constant-time compare inside `token_matches`).
     let header = request
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let token = header.strip_prefix("Bearer ").unwrap_or("").trim();
-    if !token.is_empty() && token == state.config.auth.token {
+    if !token.is_empty() && state.config.token_matches(token) {
         Ok(next.run(request).await)
     } else {
         let mut resp = (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
@@ -279,6 +316,31 @@ fn is_loopback(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(a) => a.is_loopback(),
         IpAddr::V6(a) => a.is_loopback(),
+    }
+}
+
+/// True if `ip` falls inside any configured CIDR. Unparseable entries are
+/// ignored (treated as non-matching) so one typo can't silently allow-all.
+fn ip_in_networks(ip: IpAddr, networks: &[String]) -> bool {
+    networks.iter().any(|cidr| {
+        cidr.trim()
+            .parse::<ipnet::IpNet>()
+            .map(|net| net.contains(&ip))
+            .unwrap_or(false)
+    })
+}
+
+/// AR-02: accept only requests whose `Host` header is in the startup allowlist
+/// (loopback names + LAN IPs, with and without `:port`). Missing `Host` is
+/// refused — HTTP/1.1 requires it, and its absence is characteristic of crafted
+/// requests. An empty allowlist disables the check (defensive; not expected).
+fn host_allowed(headers: &HeaderMap, allowed: &HashSet<String>) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    match headers.get(header::HOST).and_then(|v| v.to_str().ok()) {
+        Some(h) => allowed.contains(h.trim().to_ascii_lowercase().as_str()),
+        None => false,
     }
 }
 

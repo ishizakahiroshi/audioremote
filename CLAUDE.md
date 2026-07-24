@@ -30,7 +30,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 | HTTP サーバー | axum 等の軽量 crate（予定） |
 | 静的アセット同梱 | `rust-embed` 等で単一バイナリに Web UI を埋め込み（予定） |
 | 設定 | `%APPDATA%\audioremote\config.toml`（bind / require_token / allowed_networks） |
-| 認証 | `Authorization: Bearer <token>`（初回起動時に生成・保存） |
+| 認証 | `Authorization: Bearer <token>`（初回生成・名前付き複数トークン・失効可。`audioremote token add\|revoke\|list`） |
 | 配布（主） | npm レジストリ（Rust exe を optionalDependencies でプラットフォーム別に同梱） |
 | 配布（副） | GitHub Releases（exe + SHA256SUMS・未署名） |
 
@@ -71,7 +71,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 - **音声デバイス切替は必ず Windows のデバイス ID で行う**（表示名は再接続等で変わりうる）
 - **切替 API は 3 役割（Console/Multimedia/Communications）まとめて変更する**（個別切替は v0.1 スコープ外）
 - **サーバーはログオンユーザーのセッションで動かす**（SYSTEM サービスにしない。音声デバイスは対話ユーザー所属のため）
-- **HTTP bind の既定は `127.0.0.1`**。LAN bind に開ける設定は残すが、開けたときは Bearer トークン認証必須
+- **HTTP bind の既定は `0.0.0.0`（LAN 公開・2026-07-24 LAN-first 転換）**。非 loopback クライアントは Bearer トークン必須・loopback（ホスト自身）は素通し。`127.0.0.1` に閉じたい場合は `audioremote setup`。Host ヘッダ許可リストで DNS rebinding を防ぎ、`allowed_networks`（CIDR）で送信元 IP を絞れる
 - **`crates.io` 版の `0.0.x` は予約占有用**。本リリースは `0.1.0` から（yank しても名前は永久占有される点に注意）
 
 ## secrets-scan（このリポジトリの配線）
