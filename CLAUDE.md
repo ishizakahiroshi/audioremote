@@ -38,7 +38,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 
 - `src/main.rs` — バイナリ crate エントリ（現状は crates.io 予約用 Hello world スタブ）
 - `Cargo.toml` — パッケージ定義（`name = "audioremote"` / `version = "0.0.0"` 予約占有中・本リリースは `0.1.0` から）
-- `docs/local/` — plan / recap / bugfix / pending（**tracked**。秘匿情報を書かない）
+- `docs/local/` — plan / recap / bugfix / pending（**gitignore・非公開**。"local" の名のとおり追跡しない。公開したい開発ドキュメントは `docs/` 直下へ置く）
   - `plan_audioremote-v0.1.md` — v0.1 の作業分割（C1〜C5）と API 仕様の正本
   - `recap_2026-07-24_audioremote-naming-reserve.md` — 命名確定・3 チャネル名前予約・クライアント形決定
 - `scripts/` — `secrets-scan.mjs` / `install-hooks.{sh,ps1}`

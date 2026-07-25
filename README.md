@@ -4,8 +4,7 @@ Switch your **Windows 11 host's default audio output device** from any browser o
 No more walking back to the host to change the output from Nest Hub Max to wired earphones
 during a meeting — do it from a Hyper-V guest, WSL2, your phone, or another PC.
 
-> Status: **v0.1 in development** (C1 scaffold). Not yet released.
-> See `docs/local/plan_audioremote-v0.1.md` for the full plan and `docs/local/mockup_audioremote-v0.1-ux_2026-07-24.html` for the UX mockup.
+> Status: **v0.1 in development**. Not yet released.
 
 ---
 
@@ -124,7 +123,7 @@ audioremote/
 ├── .githooks/                  layer 2 pre-commit
 ├── .github/workflows/          CI (validate.yml) + secrets-scan
 └── docs/
-    └── local/                  plan / recap / bugfix / mockup (tracked, no secrets)
+    └── local/                  plan / recap / bugfix / mockup (gitignored — local-only)
 ```
 
 ## License

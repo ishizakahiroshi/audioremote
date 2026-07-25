@@ -37,7 +37,8 @@ desktop.ini
 .docsweep/
 
 # === ローカル/プライベート追記（fresh public clone から除外） ===
-# 家標準: docs/local/ は tracked（bugfix/recap の後日 grep 効率のため）。ignore しない
+# docs/local/ は "local"（その環境限定・非公開）の名のとおり ignore する。
+# ローカル grep は追跡外でも効く。公開したい開発ドキュメントは docs/ 直下へ置く。
 .env
 .env.*
 !.env.example
@@ -46,6 +47,7 @@ desktop.ini
 *.local.md
 *.local.json
 scripts/local/
+docs/local/
 
 # === 認証情報・secrets・鍵（public へ絶対に出さない） ===
 *.pem
