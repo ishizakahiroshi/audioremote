@@ -1,5 +1,6 @@
 #[cfg(windows)]
 mod about;
+mod autostart;
 #[cfg(windows)]
 mod audio;
 #[cfg(windows)]
@@ -19,6 +20,8 @@ fn main() {
 
     match cmd {
         "--help" | "-h" | "help" => banner(),
+        "--install-autostart" => run_install_autostart(),
+        "--uninstall-autostart" => run_uninstall_autostart(),
         "serve" => {
             let no_open = args.iter().skip(2).any(|a| a == "--no-open");
             run_serve(no_open);
@@ -53,9 +56,52 @@ fn banner() {
     println!("  audioremote list          list playback endpoints + current defaults");
     println!("  audioremote set <id>      switch default (Console/Multimedia/Communications)");
     println!("  audioremote token ...     manage LAN tokens (list / add <name> / revoke <name|token>)");
+    println!("  audioremote --install-autostart     start server at logon (HKCU Run)");
+    println!("  audioremote --uninstall-autostart  remove the AudioRemote logon entry");
     println!("  audioremote --help        show this help");
     println!();
     println!("Repository: {}", env!("CARGO_PKG_REPOSITORY"));
+}
+
+fn run_install_autostart() {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => {
+            eprintln!("[fatal] cannot determine current executable: {e}");
+            std::process::exit(1);
+        }
+    };
+    let command = match autostart::install(&exe) {
+        Ok(command) => command,
+        Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
+            eprintln!("[unsupported] {e}");
+            std::process::exit(2);
+        }
+        Err(e) => {
+            eprintln!("[fatal] cannot install autostart: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    println!("AudioRemote autostart installed.");
+    println!(r"  registry: HKCU\{}", autostart::RUN_KEY_PATH);
+    println!("  value:    {}", autostart::VALUE_NAME);
+    println!("  command:  {command}");
+    println!("  note:     run this command again if the exe is moved.");
+}
+
+fn run_uninstall_autostart() {
+    match autostart::uninstall() {
+        Ok(()) => println!("AudioRemote autostart removed (if it was registered)."),
+        Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
+            eprintln!("[unsupported] {e}");
+            std::process::exit(2);
+        }
+        Err(e) => {
+            eprintln!("[fatal] cannot uninstall autostart: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 #[cfg(windows)]

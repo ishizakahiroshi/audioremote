@@ -6,6 +6,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, Path as AxumPath, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::middleware::{self, Next};
@@ -13,7 +14,7 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use rust_embed::RustEmbed;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 #[derive(RustEmbed)]
@@ -45,6 +46,7 @@ pub async fn serve(state: AppState) -> Result<(), std::io::Error> {
         .route("/api/status", get(status_handler))
         .route("/api/devices", get(devices_handler))
         .route("/api/devices/:id/default", post(set_default_handler))
+        .route("/api/volume", get(volume_handler).post(set_volume_handler))
         .route("/api/about", get(about_handler))
         .route("/api/languages", get(languages_handler))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
@@ -166,6 +168,56 @@ async fn set_default_handler(
         }
     }
     (StatusCode::NO_CONTENT).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct VolumePatch {
+    level: Option<f32>,
+    muted: Option<bool>,
+}
+
+impl VolumePatch {
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.level.is_none() && self.muted.is_none() {
+            return Err("at least one of level or muted is required");
+        }
+        if let Some(level) = self.level {
+            if !level.is_finite() || !(0.0..=1.0).contains(&level) {
+                return Err("level must be a finite number between 0 and 1");
+            }
+        }
+        Ok(())
+    }
+}
+
+async fn volume_handler() -> Response {
+    match audio::get_master_volume() {
+        Ok(volume) => Json(volume).into_response(),
+        Err(e) => audio_error(e),
+    }
+}
+
+async fn set_volume_handler(
+    body: Result<Json<VolumePatch>, JsonRejection>,
+) -> Response {
+    let Json(patch) = match body {
+        Ok(body) => body,
+        Err(e) => return bad_request(&format!("invalid JSON body: {e}")),
+    };
+    if let Err(message) = patch.validate() {
+        return bad_request(message);
+    }
+
+    let result = match (patch.level, patch.muted) {
+        (Some(level), None) => audio::set_master_volume(level),
+        (None, Some(muted)) => audio::set_master_mute(muted),
+        (Some(level), Some(muted)) => audio::update_master_volume(Some(level), Some(muted)),
+        (None, None) => unreachable!("VolumePatch::validate rejected an empty patch"),
+    };
+    match result {
+        Ok(volume) => Json(volume).into_response(),
+        Err(e) => audio_error(e),
+    }
 }
 
 async fn about_handler() -> Response {
@@ -353,7 +405,20 @@ fn audio_error(e: audio::AudioError) -> Response {
         "message": e.source.to_string(),
         "hresult": format!("0x{:08x}", e.source.code().0 as u32),
     });
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+    let status = if e.is_invalid_input() {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    (status, Json(body)).into_response()
+}
+
+fn bad_request(message: &str) -> Response {
+    let body = serde_json::json!({
+        "error": "invalid_request",
+        "message": message,
+    });
+    (StatusCode::BAD_REQUEST, Json(body)).into_response()
 }
 
 fn sort_by_state(devices: &mut [AudioDevice]) {
@@ -368,5 +433,51 @@ fn state_rank(d: &AudioDevice) -> u8 {
         Disabled => 2,
         NotPresent => 3,
         Unknown => 4,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VolumePatch;
+
+    fn patch(json: &str) -> VolumePatch {
+        serde_json::from_str(json).expect("valid JSON fixture")
+    }
+
+    #[test]
+    fn volume_patch_requires_at_least_one_field() {
+        assert!(patch("{}").validate().is_err());
+    }
+
+    #[test]
+    fn volume_patch_accepts_boundary_levels_and_mute_values() {
+        for json in [
+            r#"{"level":0}"#,
+            r#"{"level":0.5}"#,
+            r#"{"level":1}"#,
+            r#"{"muted":true}"#,
+            r#"{"muted":false}"#,
+            r#"{"level":0.5,"muted":false}"#,
+        ] {
+            assert!(patch(json).validate().is_ok(), "{json}");
+        }
+    }
+
+    #[test]
+    fn volume_patch_rejects_out_of_range_levels() {
+        for json in [r#"{"level":-0.01}"#, r#"{"level":1.01}"#] {
+            assert!(patch(json).validate().is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn volume_patch_rejects_non_numbers() {
+        assert!(serde_json::from_str::<VolumePatch>(r#"{"level":"half"}"#).is_err());
+        assert!(VolumePatch {
+            level: Some(f32::NAN),
+            muted: None,
+        }
+        .validate()
+        .is_err());
     }
 }

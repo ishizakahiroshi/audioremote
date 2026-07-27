@@ -5,6 +5,7 @@
 // auto-discovers it via GET /api/languages.
 
 const POLL_MS = 3000;
+const VOLUME_DEBOUNCE_MS = 200;
 const TOKEN_KEY = "audioremote.token";
 const LANG_KEY = "audioremote.lang";
 
@@ -15,6 +16,7 @@ let state = {
   token: readTokenFromHashOrStorage(),
   status: null,
   devices: null,
+  volume: null,
   showSettings: false,
   showAbout: false,
   about: null,
@@ -25,6 +27,18 @@ let state = {
   lang: null,           // active language code, e.g. "ja"
   strings: {},          // key -> translated string
   langs: [],            // available packs [{code, name}]
+};
+
+// Kept outside render state so rebuilding the page during polling never loses
+// an in-progress slider drag or reorders a newer volume request behind an old
+// response.
+const volumeControl = {
+  active: false,
+  draft: null,
+  timer: null,
+  sending: false,
+  queued: null,
+  revision: 0,
 };
 
 // ---------- Token from hash ----------
@@ -118,12 +132,29 @@ async function api(path, opts = {}) {
 
 async function pollOnce() {
   try {
-    const [status, devicesResp] = await Promise.all([
+    const results = await Promise.allSettled([
       api("/api/status"),
       api("/api/devices"),
+      api("/api/volume"),
     ]);
+    const [statusResult, devicesResult, volumeResult] = results;
+    if (statusResult.status === "rejected" || devicesResult.status === "rejected") {
+      const failure = statusResult.status === "rejected" ? statusResult.reason : devicesResult.reason;
+      if (failure?.message === "unauthorized") return;
+      throw failure;
+    }
+
+    const status = statusResult.value;
+    const devicesResp = devicesResult.value;
     state.status = status;
     state.devices = devicesResp.devices || [];
+    if (volumeResult.status === "fulfilled") {
+      if (!volumeControl.active && !volumeControl.timer && !volumeControl.sending && !volumeControl.queued) {
+        state.volume = volumeResult.value;
+      }
+    } else if (volumeResult.reason?.message !== "unauthorized") {
+      console.warn("volume poll failed:", volumeResult.reason);
+    }
     state.needsToken = false;
     if (state.pendingId) {
       const d = state.devices.find((x) => x.id === state.pendingId);
@@ -176,6 +207,7 @@ function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   state.status = null;
   state.devices = null;
+  state.volume = null;
   state.showSettings = false;
   state.needsToken = true;
   stopPolling();
@@ -187,12 +219,113 @@ async function changeLang(code) {
   render();
 }
 
+// ---------- Master volume ---------------------------------------------------
+
+function volumePercent(level) {
+  return Math.round(Math.max(0, Math.min(1, Number(level))) * 100);
+}
+
+function volumeButtonText(muted) {
+  return (muted ? "🔇 " : "🔊 ") + t(muted ? "volume.unmute" : "volume.mute");
+}
+
+function volumeButtonLabel(muted) {
+  return t(muted ? "volume.unmuteLabel" : "volume.muteLabel");
+}
+
+function updateVolumeDom(volume) {
+  if (!volume) return;
+  const percent = volumePercent(volume.level);
+  const slider = document.getElementById("volumeSlider");
+  const output = document.getElementById("volumeLevel");
+  const muteButton = document.getElementById("volumeMuteButton");
+  if (slider) slider.value = String(percent);
+  if (output) output.textContent = percent + "%";
+  if (muteButton) {
+    muteButton.textContent = volumeButtonText(volume.muted);
+    muteButton.setAttribute("aria-label", volumeButtonLabel(volume.muted));
+    muteButton.setAttribute("aria-pressed", String(volume.muted));
+  }
+}
+
+function scheduleVolumePost() {
+  if (volumeControl.timer) clearTimeout(volumeControl.timer);
+  volumeControl.timer = setTimeout(() => {
+    volumeControl.timer = null;
+    const draft = volumeControl.draft;
+    if (!draft) return;
+    const request = { revision: volumeControl.revision, ...draft };
+    if (volumeControl.sending) {
+      volumeControl.queued = request;
+    } else {
+      void sendVolume(request);
+    }
+  }, VOLUME_DEBOUNCE_MS);
+}
+
+function updateVolumeDraft(patch) {
+  const current = volumeControl.draft || state.volume;
+  if (!current) return;
+  volumeControl.draft = { ...current, ...patch };
+  volumeControl.revision += 1;
+  volumeControl.active = true;
+  state.volume = { ...state.volume, ...patch };
+  updateVolumeDom(state.volume);
+  scheduleVolumePost();
+}
+
+async function refreshVolumeAfterFailure(revision) {
+  try {
+    const volume = await api("/api/volume");
+    if (revision !== volumeControl.revision) return;
+    state.volume = volume;
+    volumeControl.draft = null;
+    updateVolumeDom(volume);
+    render();
+  } catch (e) {
+    if (e.message !== "unauthorized") console.warn("volume refresh failed:", e);
+  }
+}
+
+async function sendVolume(request) {
+  volumeControl.sending = true;
+  try {
+    const volume = await api("/api/volume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ level: request.level, muted: request.muted }),
+    });
+    if (request.revision === volumeControl.revision) {
+      state.volume = volume;
+      volumeControl.draft = volume;
+      updateVolumeDom(volume);
+    }
+  } catch (e) {
+    if (request.revision === volumeControl.revision) {
+      volumeControl.active = false;
+      toast(t("toast.volumeFailed", { msg: e.message }), "err");
+      await refreshVolumeAfterFailure(request.revision);
+    }
+  } finally {
+    volumeControl.sending = false;
+    if (volumeControl.queued) {
+      const next = volumeControl.queued;
+      volumeControl.queued = null;
+      void sendVolume(next);
+    } else if (request.revision === volumeControl.revision) {
+      volumeControl.active = false;
+      volumeControl.draft = null;
+    }
+  }
+}
+
 // ---------- Rendering ----------
 
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k === "onclick") el.addEventListener("click", v);
+    else if (k === "oninput") el.addEventListener("input", v);
     else if (k === "onchange") el.addEventListener("change", v);
     else if (k === "class") el.className = v;
     else if (k === "html") el.innerHTML = v;
@@ -274,13 +407,14 @@ function renderMain() {
   );
 
   const share = renderSharePanel(s.share_urls || []);
+  const volume = renderVolumePanel();
 
   const activeDevices = state.devices.filter((d) => d.state === "active");
   const hiddenCount = state.devices.length - activeDevices.length;
   const visible = state.showInactive ? state.devices : activeDevices;
   const cards = visible.map((d) => renderDeviceCard(d));
 
-  app.append(header, meta, share, h("div", {}, ...cards));
+  app.append(header, meta, share, volume, h("div", {}, ...cards));
 
   if (hiddenCount > 0) {
     app.append(h("button", {
@@ -293,6 +427,44 @@ function renderMain() {
 
   app.append(
     h("div", { class: "footer-note" }, t("devices.footerNote")),
+  );
+}
+
+function renderVolumePanel() {
+  const v = state.volume;
+  if (!v) return document.createDocumentFragment();
+  const percent = volumePercent(v.level);
+  const slider = h("input", {
+    id: "volumeSlider",
+    class: "volume-slider",
+    type: "range",
+    min: "0",
+    max: "100",
+    step: "1",
+    value: String(percent),
+    "aria-label": t("volume.sliderLabel"),
+    oninput: (e) => updateVolumeDraft({ level: Number(e.target.value) / 100 }),
+    onchange: () => { volumeControl.active = false; },
+  });
+  const muteButton = h("button", {
+    id: "volumeMuteButton",
+    class: "btn volume-mute",
+    type: "button",
+    "aria-label": volumeButtonLabel(v.muted),
+    "aria-pressed": String(v.muted),
+    onclick: () => updateVolumeDraft({ muted: !((volumeControl.draft || state.volume).muted) }),
+  }, volumeButtonText(v.muted));
+
+  return h("section", { class: "volume-panel", "aria-labelledby": "volumeTitle" },
+    h("div", { class: "volume-head" },
+      h("div", {},
+        h("h2", { id: "volumeTitle" }, t("volume.title")),
+        h("div", { class: "volume-hint" }, t("volume.hint")),
+      ),
+      h("output", { id: "volumeLevel", class: "volume-level", for: "volumeSlider" }, percent + "%"),
+    ),
+    slider,
+    muteButton,
   );
 }
 

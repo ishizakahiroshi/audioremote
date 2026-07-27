@@ -1,16 +1,17 @@
 //! Windows Core Audio wrapper.
 //!
-//! Public API kept small on purpose so C3 (HTTP server) only needs
-//! `list_devices()` and `set_default(device_id)`. Serialization is added in C3
-//! when the axum layer needs it; C2 stays framework-free.
+//! Public API kept small on purpose so the HTTP server does not need to know
+//! about COM or unsafe Windows API details.
 
 use windows::core::PWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::{
     eCommunications, eConsole, eMultimedia, eRender, ERole, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, DEVICE_STATE, DEVICE_STATE_ACTIVE, DEVICE_STATE_DISABLED,
-    DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
+    MMDeviceEnumerator, DEVICE_STATE, DEVICE_STATE_ACTIVE,
+    DEVICE_STATE_DISABLED, DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
 };
+use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+use windows::Win32::Foundation::{BOOL, E_INVALIDARG};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
 };
@@ -26,6 +27,14 @@ pub struct AudioDevice {
     pub is_default_console: bool,
     pub is_default_multimedia: bool,
     pub is_default_communications: bool,
+}
+
+/// Master volume state for the current default Multimedia render endpoint.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MasterVolume {
+    pub device_id: String,
+    pub level: f32,
+    pub muted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -64,6 +73,14 @@ impl DeviceState {
 pub struct AudioError {
     pub context: &'static str,
     pub source: windows::core::Error,
+}
+
+const INVALID_VOLUME_LEVEL_CONTEXT: &str = "invalid master volume level";
+
+impl AudioError {
+    pub fn is_invalid_input(&self) -> bool {
+        self.context == INVALID_VOLUME_LEVEL_CONTEXT
+    }
 }
 
 impl std::fmt::Display for AudioError {
@@ -207,4 +224,89 @@ pub fn set_default(device_id: &str) -> Result<()> {
         context: "IPolicyConfig::SetDefaultEndpoint",
         source: e,
     })
+}
+
+fn invalid_volume_level() -> AudioError {
+    AudioError {
+        context: INVALID_VOLUME_LEVEL_CONTEXT,
+        source: windows::core::Error::from_hresult(E_INVALIDARG),
+    }
+}
+
+fn validate_volume_level(level: f32) -> Result<()> {
+    if level.is_finite() && (0.0..=1.0).contains(&level) {
+        Ok(())
+    } else {
+        Err(invalid_volume_level())
+    }
+}
+
+fn default_multimedia_volume() -> Result<(String, IAudioEndpointVolume)> {
+    let enumerator = create_enumerator()?;
+    let device = wrap("GetDefaultAudioEndpoint(eRender, eMultimedia)", unsafe {
+        enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia)
+    })?;
+    let id = device_id(&device)?;
+    let endpoint = wrap("IMMDevice::Activate(IAudioEndpointVolume)", unsafe {
+        device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)
+    })?;
+    Ok((id, endpoint))
+}
+
+fn read_master_volume(device_id: String, endpoint: &IAudioEndpointVolume) -> Result<MasterVolume> {
+    let level = wrap(
+        "IAudioEndpointVolume::GetMasterVolumeLevelScalar",
+        unsafe { endpoint.GetMasterVolumeLevelScalar() },
+    )?;
+    let muted = wrap("IAudioEndpointVolume::GetMute", unsafe { endpoint.GetMute() })?.0 != 0;
+    Ok(MasterVolume {
+        device_id,
+        level,
+        muted,
+    })
+}
+
+/// Read the master level and mute state from the default Multimedia endpoint.
+pub fn get_master_volume() -> Result<MasterVolume> {
+    let _com = ComGuard::new()?;
+    let (id, endpoint) = default_multimedia_volume()?;
+    read_master_volume(id, &endpoint)
+}
+
+/// Update either or both master-volume fields and return the resulting state.
+/// This is kept crate-visible so the HTTP layer can apply a combined request
+/// in one endpoint activation without exposing COM types.
+pub(crate) fn update_master_volume(level: Option<f32>, muted: Option<bool>) -> Result<MasterVolume> {
+    if level.is_none() && muted.is_none() {
+        return Err(invalid_volume_level());
+    }
+    if let Some(level) = level {
+        validate_volume_level(level)?;
+    }
+
+    let _com = ComGuard::new()?;
+    let (id, endpoint) = default_multimedia_volume()?;
+    if let Some(level) = level {
+        wrap(
+            "IAudioEndpointVolume::SetMasterVolumeLevelScalar",
+            unsafe { endpoint.SetMasterVolumeLevelScalar(level, std::ptr::null()) },
+        )?;
+    }
+    if let Some(muted) = muted {
+        wrap(
+            "IAudioEndpointVolume::SetMute",
+            unsafe { endpoint.SetMute(BOOL(muted as i32), std::ptr::null()) },
+        )?;
+    }
+    read_master_volume(id, &endpoint)
+}
+
+/// Set the master level on the default Multimedia endpoint.
+pub fn set_master_volume(level: f32) -> Result<MasterVolume> {
+    update_master_volume(Some(level), None)
+}
+
+/// Set the mute state on the default Multimedia endpoint.
+pub fn set_master_mute(muted: bool) -> Result<MasterVolume> {
+    update_master_volume(None, Some(muted))
 }

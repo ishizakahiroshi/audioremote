@@ -23,6 +23,7 @@ Physical devices (Nest Hub Max / wired earphones / headphones / …)
 - The server runs in **your physical console session** (not as a SYSTEM service, and not inside an RDP session — audio endpoints belong to the interactive user's physical session; from an RDP session you only see the virtual "Remote Audio" endpoint).
 - Default bind is **`0.0.0.0:17650`** — exposed to the LAN out of the box, because controlling the host from another machine is the whole point. Non-loopback clients require a bearer token; loopback (the host itself) is bypassed. Lock it down to `127.0.0.1` with `audioremote setup` if you don't need remote control.
 - Console / Multimedia / Communications default endpoints are always **switched together** (otherwise meeting apps still route to the old device via the Communications default).
+- The Web UI controls the **master volume and mute state** of the current default Multimedia output. Volume is per output device, so it follows the selected endpoint after a device switch.
 - Switching is done by **device ID**, not display name (display names change on reconnect).
 
 ## Supported platforms
@@ -48,7 +49,7 @@ Neither channel is live yet. Names are reserved on all three: npm `audioremote`,
 ```powershell
 # On Windows 11 with Rust stable
 cargo build            # dev build
-cargo run              # runs the C1 scaffold (prints a banner)
+cargo run              # starts the local HTTP server
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --all
@@ -56,9 +57,49 @@ cargo fmt --all
 
 `cargo build --release` produces `target/release/audioremote.exe`.
 
+## Volume and mute
+
+Open the built-in Web UI from the host or a LAN client. The master-volume panel
+uses the current default **Multimedia** render endpoint and provides a 0–100%
+slider plus mute/unmute. Changes made in Windows are picked up by the Web UI's
+three-second refresh, and switching the output device refreshes the panel for
+the new endpoint.
+
+The same state is available through the authenticated HTTP API:
+
+```text
+GET  /api/volume
+POST /api/volume   {"level": 0.5}
+POST /api/volume   {"muted": true}
+```
+
+`level` is a finite scalar from `0.0` to `1.0`; invalid requests return HTTP
+400. The existing bearer-token, Host-header, and CIDR checks apply unchanged.
+
+## Start at logon (v0.1 minimal autostart)
+
+Register the current executable in the per-user HKCU Run key:
+
+```powershell
+.\target\release\audioremote.exe --install-autostart
+```
+
+Remove only AudioRemote's own Run value with:
+
+```powershell
+.\target\release\audioremote.exe --uninstall-autostart
+```
+
+The registered command is the quoted absolute exe path followed by
+`serve --no-open`, so signing in starts the server without opening a browser.
+This v0.1 form does not add firewall rules, request UAC elevation, or hide the
+console window; a console may remain visible. If the exe is moved, run the
+install command again.
+
 ## Roadmap
 
-- **v0.1** — Host server + HTTP API + minimal built-in Web UI (this milestone).
+- **v0.1** — Host server + HTTP API + built-in Web UI, including device switching,
+  master volume/mute, and minimal per-user autostart (this milestone).
 - **v0.2** — Guest-resident companion app on Windows: tray-icon popup + global hotkey for the daily meeting toggle (e.g. Nest Hub Max ⇄ wired earphones). Same HTTP API, different client.
 - **v0.3+** — Additional entry points (PWA / app window) as needed.
 
@@ -101,6 +142,7 @@ Device usage history (for `device_sort = "recent"`) is stored separately in `%AP
 - When bound to LAN, the guest UI shows a **"LAN exposed"** badge as a reminder.
 - No unsigned exe direct-download flow is recommended for end users; use the npm channel to avoid SmartScreen prompts.
 - No HTTPS out of the box in v0.1. Reverse-proxy or manual TLS is left to the operator.
+- The v0.1 autostart command does not modify RDP settings, audio drivers, or Windows Firewall rules.
 
 ## Non-goals (v0.1)
 

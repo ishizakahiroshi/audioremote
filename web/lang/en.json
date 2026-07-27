@@ -25,6 +25,14 @@
   "share.copyFailed": "Copy failed",
   "share.virtualSwitch": " (virtual switch)",
 
+  "volume.title": "Master volume",
+  "volume.hint": "Default Multimedia output",
+  "volume.sliderLabel": "Master volume (0–100%)",
+  "volume.mute": "Mute",
+  "volume.unmute": "Unmute",
+  "volume.muteLabel": "Mute master volume",
+  "volume.unmuteLabel": "Unmute master volume",
+
   "devices.applying": "Applying…",
   "devices.footerNote": "Tap to switch Console / Multimedia / Communications together.",
   "devices.showInactive": "Show {count} more (unplugged / disabled)",
@@ -65,5 +73,6 @@
   "about.frontendSection": "Frontend",
   "about.ossSection": "Bundled open-source software (Rust crates · {count})",
 
-  "toast.switchFailed": "Switch failed: {msg}"
+  "toast.switchFailed": "Switch failed: {msg}",
+  "toast.volumeFailed": "Volume change failed: {msg}"
 }

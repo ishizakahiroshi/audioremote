@@ -59,6 +59,8 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 - テスト: `cargo test`
 - lint: `cargo clippy`
 - 整形: `cargo fmt`
+- 自動起動登録: `audioremote --install-autostart`
+- 自動起動解除: `audioremote --uninstall-autostart`
 - secrets-scan 手動実行: `node scripts/secrets-scan.mjs --staged --block`
 
 ## AI 作業共通ルール
@@ -89,7 +91,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 
 | 項目 | パス |
 |---|---|
-| ユーザー向け README | `README.md`（未作成・C1 で作る） |
+| ユーザー向け README | `README.md` |
 | Codex/他 AI 用入口 | `AGENTS.md` |
 | v0.1 実装計画（正本） | `docs/local/plan_audioremote-v0.1.md` |
 | 命名・配布方針の経緯 | `docs/local/recap_2026-07-24_audioremote-naming-reserve.md` |

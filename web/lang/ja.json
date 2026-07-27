@@ -25,6 +25,14 @@
   "share.copyFailed": "コピー失敗",
   "share.virtualSwitch": "（仮想スイッチ）",
 
+  "volume.title": "マスター音量",
+  "volume.hint": "既定 Multimedia 出力の音量",
+  "volume.sliderLabel": "マスター音量（0〜100%）",
+  "volume.mute": "ミュート",
+  "volume.unmute": "ミュート解除",
+  "volume.muteLabel": "マスター音量をミュート",
+  "volume.unmuteLabel": "マスター音量のミュートを解除",
+
   "devices.applying": "適用中…",
   "devices.footerNote": "タップで Console / Multimedia / Communications をまとめて切替。",
   "devices.showInactive": "他 {count} 個 (unplugged / disabled) を表示",
@@ -65,5 +73,6 @@
   "about.frontendSection": "フロントエンド",
   "about.ossSection": "同梱しているオープンソースソフトウェア（Rust crates · {count} 個）",
 
-  "toast.switchFailed": "切替に失敗: {msg}"
+  "toast.switchFailed": "切替に失敗: {msg}",
+  "toast.volumeFailed": "音量変更に失敗: {msg}"
 }
