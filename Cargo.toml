@@ -2,7 +2,11 @@
 name = "audioremote"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+# Effective floor of the locked dependency graph, not an aspiration: rust-embed
+# 8.12 needs 1.80, cargo_metadata 0.19 needs 1.78, and the toml 1.1 / sha2 0.11
+# chain pulled in below needs 1.85. Verified by the fixed-toolchain job in
+# .github/workflows/validate.yml — raise both together or not at all.
+rust-version = "1.85"
 description = "Switch your Windows 11 host's default audio output device from any browser on the LAN"
 readme = "README.md"
 license = "MIT"
@@ -19,7 +23,14 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "net",
+    # `time` powers the audio-gate acquisition timeout in server.rs.
+    "time",
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -45,7 +56,6 @@ windows = { version = "0.58", features = [
     "Win32_Devices_FunctionDiscovery",
     "Win32_Devices_Properties",
 ] }
-windows-core = "0.58"
 
 [profile.release]
 opt-level = "z"

@@ -46,6 +46,46 @@ jobs:
       - name: Test
         run: cargo test --all-targets --locked
 
+  msrv:
+    name: MSRV (Cargo.toml rust-version)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to the version declared in Cargo.toml. `rust-version` is a public
+      # contract: without this job it drifts silently, which is exactly how the
+      # declared 1.75 ended up unable to build the locked dependency graph.
+      - name: Read declared MSRV
+        id: msrv
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check with the declared MSRV
+        run: cargo check --all-targets --locked
+
+  npm-launcher:
+    name: npm launcher (Node 20)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # The npm channel is the primary install path; this covers platform
+      # resolution, the missing-package message and exit-code propagation.
+      - name: Test launcher
+        run: npm test
+
   cargo-audit:
     name: cargo audit (advisories)
     runs-on: ubuntu-latest

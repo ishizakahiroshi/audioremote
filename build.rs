@@ -6,9 +6,10 @@
 //! from each crate's own Cargo.toml (`license` or `license-file`) via
 //! `cargo metadata`, so there is no manual list to keep in sync.
 //!
-//! Per-crate purpose text ("なぜこの crate を使っているか") is NOT auto-
-//! generatable — it lives in `src/about.rs::purpose_for()` and is edited by
-//! hand when adding a new dep.
+//! Per-crate purpose text ("why we use this crate") is NOT auto-generatable. It
+//! is user-facing prose, so it lives in the language packs
+//! (`web/lang/*.json`, key `about.crate.<name>`) and is edited by hand when a
+//! dependency is added.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,18 +28,37 @@ fn main() {
         .root_package()
         .expect("no root package (workspace root?)");
 
-    // Direct normal dependencies (no build-deps, no dev-deps).
-    let direct: Vec<String> = root
-        .dependencies
+    // Resolved direct *runtime* dependencies, identified by package id.
+    //
+    // Matching on ids rather than names matters: the graph can hold two versions
+    // of one crate (a build-dependency pulled in `toml 1.x` while the binary
+    // links `toml 0.8`), and a name filter listed both — crediting a build-only
+    // crate as if it shipped inside the exe, twice over.
+    let resolve = meta
+        .resolve
+        .as_ref()
+        .expect("`cargo metadata` returned no resolve graph");
+    let root_node = resolve
+        .nodes
         .iter()
-        .filter(|d| d.kind == DependencyKind::Normal)
-        .map(|d| d.name.clone())
+        .find(|n| n.id == root.id)
+        .expect("root package missing from the resolve graph");
+    let direct_ids: std::collections::HashSet<_> = root_node
+        .deps
+        .iter()
+        // An empty `dep_kinds` means the cargo that produced this metadata did not
+        // report kinds at all; treat that as a normal dependency rather than
+        // silently emitting an empty list.
+        .filter(|d| {
+            d.dep_kinds.is_empty() || d.dep_kinds.iter().any(|k| k.kind == DependencyKind::Normal)
+        })
+        .map(|d| d.pkg.clone())
         .collect();
 
     let mut entries: Vec<(String, String, String)> = meta
         .packages
         .iter()
-        .filter(|p| direct.iter().any(|n| n == &p.name))
+        .filter(|p| direct_ids.contains(&p.id))
         .map(|p| {
             let license = p.license.clone().unwrap_or_else(|| {
                 p.license_file

@@ -47,15 +47,35 @@ Neither channel is live yet. Names are reserved on all three: npm `audioremote`,
 ## Build from source (developer)
 
 ```powershell
-# On Windows 11 with Rust stable
+# On Windows 11 with Rust 1.85 or newer (see `rust-version` in Cargo.toml)
 cargo build            # dev build
 cargo run              # starts the local HTTP server
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --all
+npm test               # npm launcher (bin/audioremote.js)
 ```
 
 `cargo build --release` produces `target/release/audioremote.exe`.
+
+## Command line
+
+```text
+audioremote                     start the HTTP server (default)
+audioremote serve --no-open     start without opening a browser (used by autostart)
+audioremote setup               interactive config wizard (bind / token / sort / port)
+audioremote list                list playback endpoints + current defaults
+audioremote set <id>            switch the default output device
+audioremote share               print the LAN URLs with the token in full
+audioremote token list          list tokens (masked)
+audioremote token list --show   list tokens in full
+audioremote token add <name>    issue a new named token
+audioremote token revoke <name|token>
+```
+
+`token add` and `token revoke` take effect on a **running** server within a
+second — no restart. Everything else in `config.toml` (bind, port,
+`allowed_networks`, `device_sort`) is read once at startup.
 
 ## Volume and mute
 
@@ -74,7 +94,9 @@ POST /api/volume   {"muted": true}
 ```
 
 `level` is a finite scalar from `0.0` to `1.0`; invalid requests return HTTP
-400. The existing bearer-token, Host-header, and CIDR checks apply unchanged.
+400. Only the fields present in the body are applied, so a mute-only request
+cannot clobber a level someone changed in Windows a moment earlier. The
+bearer-token, Host-header, allowlist and same-origin checks all apply.
 
 ## Start at logon (v0.1 minimal autostart)
 
@@ -113,7 +135,7 @@ Config lives at `%APPDATA%\audioremote\config.toml` (created automatically on fi
 [server]
 bind = "0.0.0.0"     # LAN-exposed by default; "127.0.0.1" to lock to this host
 port = 17650
-allowed_networks = []   # optional CIDR allowlist, e.g. ["203.0.113.0/24"]; empty = any
+allowed_networks = []   # optional allowlist: ["203.0.113.0/24", "198.51.100.5"]; empty = any
 
 [auth]
 require_token = true
@@ -126,9 +148,20 @@ token = "ar_live_..."   # auto-generated on first run
 revoked = false
 
 [audio]
-unify_roles = true      # switch Console / Multimedia / Communications together
 device_sort = "state"   # "state" | "name" | "recent"
 ```
+
+Notes on hand-editing:
+
+- `bind` accepts an IPv4/IPv6 literal or `localhost`; host names are not
+  resolved and `port = 0` is refused. An unusable value is reported at startup
+  with the reason instead of failing obscurely.
+- `allowed_networks` accepts CIDR (`"203.0.113.0/24"`) or a bare address
+  (`"203.0.113.20"`, treated as a single host). Entries that parse as neither
+  match nothing — the startup banner names them so a typo does not read as "the
+  server ignores my LAN".
+- Console / Multimedia / Communications are **always** switched together; there
+  is no setting for it (see Non-goals).
 
 Device usage history (for `device_sort = "recent"`) is stored separately in `%APPDATA%\audioremote\history.toml` so editing config by hand does not clobber it.
 
@@ -136,13 +169,40 @@ Device usage history (for `device_sort = "recent"`) is stored separately in `%AP
 
 - **Exposed to the LAN by default** (`bind = "0.0.0.0"`). The Windows Firewall prompt on first run is the outer gate; the bearer token is the inner gate. Lock down with `audioremote setup` (bind `127.0.0.1`) if you don't want remote control.
 - Bearer token authentication required for every **non-loopback** client on all API endpoints; loopback (the host itself) is bypassed. Tokens are named and individually revocable — `audioremote token add|revoke|list`.
-- **DNS-rebinding guard**: a request is accepted only when its `Host` header matches loopback or a current LAN IP, so a malicious page whose DNS re-resolves to `127.0.0.1` cannot reach the API.
-- Optional **CIDR allowlist** (`allowed_networks`) refuses non-loopback source IPs outside the listed networks before token checking.
-- No cross-origin (CORS) handler is installed, so browsers block cross-origin **reads** by default. There is no permissive CORS policy — and no custom-header requirement either, so treat cross-origin **writes** as possible and keep the token secret.
+- **Revocation is immediate.** The running server re-reads the token set when `config.toml` changes (checked at most once a second), so `token revoke` stops a leaked token without a restart. Writes are atomic, so the server never reads a half-saved file.
+- **DNS-rebinding guard**: a request is accepted only when its `Host` header matches loopback or a current LAN IP, so a malicious page whose DNS re-resolves to `127.0.0.1` cannot reach the API. Applies to the Web UI assets as well, not just the API.
+- Optional **allowlist** (`allowed_networks`) refuses non-loopback source IPs outside the listed networks before token checking.
+- **Cross-origin writes are refused.** Because loopback skips the token, any web page could otherwise `fetch()` a device switch at `127.0.0.1` while you browse. State-changing requests must carry `Sec-Fetch-Site: same-origin`/`none` and, when an `Origin` is present, an authority matching the request's `Host`. Non-browser clients (curl, scripts) send neither header and are unaffected. No CORS handler is installed, so cross-origin **reads** stay blocked by the browser.
+- **Framing is refused** (`Content-Security-Policy: frame-ancestors 'none'` + `X-Frame-Options: DENY`), so the token-free loopback UI cannot be used for clickjacking. Every response also carries `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
+- **Tokens are masked in console output.** The startup banner prints full share URLs only on the very first run; afterwards the token is masked and `audioremote share` prints it on demand. `token list` masks by default (`--show` to reveal). This keeps live credentials out of scrollback, screen shares and redirected logs — the autostart entry re-prints the banner at every logon.
 - When bound to LAN, the guest UI shows a **"LAN exposed"** badge as a reminder.
 - No unsigned exe direct-download flow is recommended for end users; use the npm channel to avoid SmartScreen prompts.
-- No HTTPS out of the box in v0.1. Reverse-proxy or manual TLS is left to the operator.
 - The v0.1 autostart command does not modify RDP settings, audio drivers, or Windows Firewall rules.
+
+### Plain HTTP, and what that costs
+
+v0.1 speaks **HTTP, not HTTPS**. On a LAN segment you control that is a
+considered trade, not an oversight — but be clear about it: the bearer token
+travels in a header in the clear, so anyone able to sniff the segment (an
+untrusted Wi-Fi AP, an ARP-spoofing device) can capture and replay it until you
+revoke it. Accordingly:
+
+- Run it on a **trusted private LAN** only. Choose "Private networks" at the
+  Windows Firewall prompt, never "Public".
+- Narrow the reachable set with `allowed_networks`, and issue **one token per
+  device** so a single leak can be revoked without disturbing the others.
+- If you need transport encryption, put a TLS reverse proxy in front and take the
+  server off the LAN entirely: `audioremote setup` → bind `127.0.0.1`, then have
+  the proxy (Caddy, nginx, IIS ARR) terminate TLS on the same machine and forward
+  to `http://127.0.0.1:17650`. Send the **upstream** authority as `Host` —
+  `proxy_set_header Host 127.0.0.1:17650;` in nginx, `header_up Host {upstream_hostport}`
+  in Caddy — because the rebinding guard only accepts loopback and this host's own
+  LAN IPs, not your proxy's hostname. Writes still work: modern browsers send
+  `Sec-Fetch-Site: same-origin`, which is checked instead of comparing `Origin` to
+  `Host`. A browser old enough to omit that header would need `Origin` rewritten to
+  match as well; a first-class "trusted hostname" setting is deferred to v0.2.
+- Automatic HTTPS provisioning (mkcert, self-signed helpers) stays out of scope
+  for v0.1; see Non-goals.
 
 ## Non-goals (v0.1)
 
@@ -158,12 +218,16 @@ Device usage history (for `device_sort = "recent"`) is stored separately in `%AP
 ```
 audioremote/
 ├── src/                        Rust sources (binary crate)
+├── web/                        embedded Web UI (vanilla JS, no build step)
+├── bin/audioremote.js          npm launcher (resolves + runs the native binary)
+├── npm/platforms/              per-platform npm packages carrying the .exe
+├── test/                       node:test suite for the npm launcher
 ├── Cargo.toml                  package definition
 ├── CLAUDE.md / AGENTS.md       AI entry points
 ├── LICENSE                     MIT
 ├── scripts/                    secrets-scan + hook installer
 ├── .githooks/                  layer 2 pre-commit
-├── .github/workflows/          CI (validate.yml) + secrets-scan
+├── .github/workflows/          CI (validate.yml) + release + secrets-scan
 └── docs/
     └── local/                  plan / recap / bugfix / mockup (gitignored — local-only)
 ```

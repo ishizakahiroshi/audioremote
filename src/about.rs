@@ -20,9 +20,9 @@ pub struct AppInfo {
     pub build_id: &'static str,
     pub license: &'static str,
     pub copyright: &'static str,
+    /// Cargo's package description — English, because crates.io shows it. The Web
+    /// UI prefers its own localized `about.description` and falls back to this.
     pub description: &'static str,
-    /// Note about the frontend (0 third-party deps).
-    pub frontend_note: &'static str,
     pub repository: &'static str,
     pub author_site: &'static str,
     /// Base URL the Web UI appends a pre-filled `?body=` to.
@@ -33,12 +33,14 @@ pub struct AppInfo {
     pub os: String,
 }
 
+/// One bundled crate. Deliberately facts only — the "why we use it" note is
+/// user-facing prose and lives in the language packs (`web/lang/*.json`, key
+/// `about.crate.<name>`) so it follows the UI language like everything else.
 #[derive(Serialize)]
 pub struct OssEntry {
     pub name: &'static str,
     pub version: &'static str,
     pub license: &'static str,
-    pub purpose: &'static str,
 }
 
 /// Personal site of the author. Not derivable from Cargo metadata (`homepage`
@@ -54,7 +56,6 @@ pub fn build() -> AboutResponse {
             license: "MIT",
             copyright: "2026 Hiroshi Ishizaka (ishizakahiroshi)",
             description: env!("CARGO_PKG_DESCRIPTION"),
-            frontend_note: "フロントエンド（HTML / CSS / JS）は外部ライブラリを一切使わず、手書きの vanilla JavaScript で実装しています。npm / bundler / フレームワーク非依存。",
             repository: env!("CARGO_PKG_REPOSITORY"),
             author_site: AUTHOR_SITE,
             issues_new: concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"),
@@ -66,7 +67,6 @@ pub fn build() -> AboutResponse {
                 name,
                 version,
                 license,
-                purpose: purpose_for(name),
             })
             .collect(),
     }
@@ -140,20 +140,52 @@ fn registry_current_version(value_name: &str) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-/// Hand-curated "why we use this" text. Keep in sync when adding a new direct
-/// dependency; unknown entries fall through to an empty string.
-fn purpose_for(name: &str) -> &'static str {
-    match name {
-        "axum" => "HTTP サーバーフレームワーク",
-        "tokio" => "非同期ランタイム",
-        "serde" => "シリアライズ基盤",
-        "serde_json" => "JSON 生成 / パース",
-        "toml" => "config.toml / history.toml 読み書き",
-        "getrandom" => "OS 乱数によるトークン採番",
-        "rust-embed" => "Web UI 資産の exe 埋め込み",
-        "local-ip-address" => "LAN NIC の自動列挙",
-        "windows" => "Windows Core Audio / 非公開 IPolicyConfig COM バインディング (Microsoft)",
-        "windows-core" => "windows crate の共通コア (Microsoft)",
-        _ => "",
+// The per-crate "why we use this" text used to live here as hardcoded Japanese,
+// which meant the English UI showed Japanese notes. It now lives in every
+// language pack under `about.crate.<name>`; add a key there when adding a direct
+// dependency (a missing key simply renders no note).
+
+#[cfg(test)]
+mod tests {
+    use super::OSS_LIST;
+
+    /// Guards the About panel against the defect that put Japanese text in the
+    /// English UI: every bundled crate needs a purpose note in **every** language
+    /// pack, and the moment a dependency is added without one, this fails.
+    #[test]
+    fn every_language_pack_covers_the_bundled_crates() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("web/lang");
+        let mut packs = 0;
+
+        for entry in std::fs::read_dir(&dir).expect("web/lang is readable") {
+            let path = entry.expect("directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read language pack");
+            let pack: serde_json::Value = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", path.display()));
+            packs += 1;
+
+            let has = |key: &str| {
+                pack.get(key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.trim().is_empty())
+            };
+
+            // Prose that used to come from the server as hardcoded Japanese.
+            for key in ["about.description", "about.frontendBody"] {
+                assert!(has(key), "{} is missing {key}", path.display());
+            }
+            for (name, _version, _license) in OSS_LIST {
+                let key = format!("about.crate.{name}");
+                assert!(has(&key), "{} is missing {key}", path.display());
+            }
+        }
+
+        assert!(
+            packs >= 2,
+            "expected at least the ja and en packs, found {packs}"
+        );
     }
 }

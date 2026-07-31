@@ -5,7 +5,7 @@
 
 use windows::core::PWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Foundation::{BOOL, E_INVALIDARG};
+use windows::Win32::Foundation::{BOOL, E_INVALIDARG, E_UNEXPECTED};
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     eCommunications, eConsole, eMultimedia, eRender, ERole, IMMDevice, IMMDeviceEnumerator,
@@ -13,7 +13,8 @@ use windows::Win32::Media::Audio::{
     DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
+    COINIT_MULTITHREADED, STGM_READ,
 };
 
 mod policyconfig;
@@ -76,10 +77,20 @@ pub struct AudioError {
 }
 
 const INVALID_VOLUME_LEVEL_CONTEXT: &str = "invalid master volume level";
+/// Raised when the three role defaults do not all point at the requested device
+/// after a switch (see `verify_all_roles`).
+const ROLE_SPLIT_CONTEXT: &str = "default endpoint roles diverged after switch";
 
 impl AudioError {
     pub fn is_invalid_input(&self) -> bool {
         self.context == INVALID_VOLUME_LEVEL_CONTEXT
+    }
+
+    /// True for the "roles ended up split" failure. The HTTP layer reports it as
+    /// a conflict rather than a generic internal error because the request was
+    /// well-formed — the host state simply did not settle where it was asked to.
+    pub fn is_role_split(&self) -> bool {
+        self.context == ROLE_SPLIT_CONTEXT
     }
 }
 
@@ -129,22 +140,42 @@ fn create_enumerator() -> Result<IMMDeviceEnumerator> {
     })
 }
 
-fn pwstr_to_string(p: PWSTR) -> String {
-    if p.is_null() {
-        return String::new();
-    }
-    unsafe {
-        let mut len = 0usize;
-        while *p.0.add(len) != 0 {
-            len += 1;
+/// Owning guard for a `PWSTR` that Windows allocated with `CoTaskMemAlloc`
+/// (`IMMDevice::GetId` is the one we use). windows-rs hands back the raw pointer
+/// without taking ownership, so **the caller must free it** — dropping this
+/// guard is the only place that happens. Wrap the pointer the moment it is
+/// obtained so early returns and conversion failures cannot leak it.
+struct CoTaskString(PWSTR);
+
+impl CoTaskString {
+    /// Copy the NUL-terminated UTF-16 buffer into an owned `String`. Empty when
+    /// the pointer is null.
+    fn to_rust_string(&self) -> String {
+        if self.0.is_null() {
+            return String::new();
         }
-        String::from_utf16_lossy(std::slice::from_raw_parts(p.0, len))
+        unsafe {
+            let mut len = 0usize;
+            while *self.0 .0.add(len) != 0 {
+                len += 1;
+            }
+            String::from_utf16_lossy(std::slice::from_raw_parts(self.0 .0, len))
+        }
+    }
+}
+
+impl Drop for CoTaskString {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { CoTaskMemFree(Some(self.0 .0 as *const std::ffi::c_void)) };
+            self.0 = PWSTR::null();
+        }
     }
 }
 
 fn device_id(dev: &IMMDevice) -> Result<String> {
-    let raw = wrap("IMMDevice::GetId", unsafe { dev.GetId() })?;
-    Ok(pwstr_to_string(raw))
+    let raw = CoTaskString(wrap("IMMDevice::GetId", unsafe { dev.GetId() })?);
+    Ok(raw.to_rust_string())
 }
 
 fn device_state(dev: &IMMDevice) -> Result<DEVICE_STATE> {
@@ -209,8 +240,8 @@ fn current_defaults(enumerator: &IMMDeviceEnumerator) -> DefaultIds {
     fn one(enumerator: &IMMDeviceEnumerator, role: ERole) -> Option<String> {
         unsafe {
             let dev = enumerator.GetDefaultAudioEndpoint(eRender, role).ok()?;
-            let p = dev.GetId().ok()?;
-            Some(pwstr_to_string(p))
+            let id = CoTaskString(dev.GetId().ok()?);
+            Some(id.to_rust_string())
         }
     }
     DefaultIds {
@@ -223,12 +254,43 @@ fn current_defaults(enumerator: &IMMDeviceEnumerator) -> DefaultIds {
 /// Switch the default output device for all three roles (Console / Multimedia
 /// / Communications) at once. Uses non-public IPolicyConfig; tries Win10/11
 /// IID first, falls back to the Vista IID.
+///
+/// Callers must serialize this against every other audio operation — see
+/// `server::AudioGate`. `IPolicyConfig` sets the roles one at a time, so two
+/// interleaved switches can leave the roles pointing at different devices;
+/// `verify_all_roles` turns that into an error instead of a silent success.
 pub fn set_default(device_id: &str) -> Result<()> {
     let _com = ComGuard::new()?;
     policyconfig::set_default_for_all_roles(device_id).map_err(|e| AudioError {
         context: "IPolicyConfig::SetDefaultEndpoint",
         source: e,
-    })
+    })?;
+    verify_all_roles(device_id)
+}
+
+/// Re-read the three role defaults and confirm they all point at `device_id`.
+/// The non-negotiable contract of this app is that the roles move together, so a
+/// split (partial `SetDefaultEndpoint` failure, a device that Windows refused to
+/// adopt, or a concurrent switch that slipped through) is reported as a failure.
+fn verify_all_roles(device_id: &str) -> Result<()> {
+    let enumerator = create_enumerator()?;
+    let actual = current_defaults(&enumerator);
+    let settled = |role: &Option<String>| {
+        role.as_deref()
+            // Endpoint IDs are compared case-insensitively: the string Windows
+            // hands back is stable, but the one the client echoes back to us
+            // came through a URL path and may have been re-cased on the way.
+            .map(|id| id.eq_ignore_ascii_case(device_id))
+            .unwrap_or(false)
+    };
+    if settled(&actual.console) && settled(&actual.multimedia) && settled(&actual.communications) {
+        Ok(())
+    } else {
+        Err(AudioError {
+            context: ROLE_SPLIT_CONTEXT,
+            source: windows::core::Error::from_hresult(E_UNEXPECTED),
+        })
+    }
 }
 
 fn invalid_volume_level() -> AudioError {
@@ -280,13 +342,10 @@ pub fn get_master_volume() -> Result<MasterVolume> {
     read_master_volume(id, &endpoint)
 }
 
-/// Update either or both master-volume fields and return the resulting state.
-/// This is kept crate-visible so the HTTP layer can apply a combined request
-/// in one endpoint activation without exposing COM types.
-pub(crate) fn update_master_volume(
-    level: Option<f32>,
-    muted: Option<bool>,
-) -> Result<MasterVolume> {
+/// Apply exactly the master-volume fields the caller passed and return the
+/// resulting state. `None` means "leave this one alone" — the HTTP layer relies
+/// on that to avoid writing back a value it never intended to change.
+pub fn update_master_volume(level: Option<f32>, muted: Option<bool>) -> Result<MasterVolume> {
     if level.is_none() && muted.is_none() {
         return Err(invalid_volume_level());
     }
@@ -309,12 +368,65 @@ pub(crate) fn update_master_volume(
     read_master_volume(id, &endpoint)
 }
 
-/// Set the master level on the default Multimedia endpoint.
-pub fn set_master_volume(level: f32) -> Result<MasterVolume> {
-    update_master_volume(Some(level), None)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Set the mute state on the default Multimedia endpoint.
-pub fn set_master_mute(muted: bool) -> Result<MasterVolume> {
-    update_master_volume(None, Some(muted))
+    // Everything here is deliberately COM-free: these run on any Windows box,
+    // including CI runners with no real audio endpoint.
+
+    #[test]
+    fn volume_level_bounds_are_inclusive() {
+        for ok in [0.0, 0.5, 1.0] {
+            assert!(validate_volume_level(ok).is_ok(), "{ok}");
+        }
+        for bad in [-0.001, 1.001, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(validate_volume_level(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn invalid_level_is_the_only_client_error() {
+        assert!(invalid_volume_level().is_invalid_input());
+        assert!(!invalid_volume_level().is_role_split());
+
+        let split = AudioError {
+            context: ROLE_SPLIT_CONTEXT,
+            source: windows::core::Error::from_hresult(E_UNEXPECTED),
+        };
+        assert!(split.is_role_split());
+        assert!(!split.is_invalid_input());
+    }
+
+    #[test]
+    fn device_state_maps_every_known_mask() {
+        assert_eq!(
+            DeviceState::from_raw(DEVICE_STATE_ACTIVE),
+            DeviceState::Active
+        );
+        assert_eq!(
+            DeviceState::from_raw(DEVICE_STATE_UNPLUGGED),
+            DeviceState::Unplugged
+        );
+        assert_eq!(
+            DeviceState::from_raw(DEVICE_STATE_DISABLED),
+            DeviceState::Disabled
+        );
+        assert_eq!(
+            DeviceState::from_raw(DEVICE_STATE_NOTPRESENT),
+            DeviceState::NotPresent
+        );
+        assert_eq!(
+            DeviceState::from_raw(DEVICE_STATE(0xff)),
+            DeviceState::Unknown
+        );
+    }
+
+    #[test]
+    fn null_cotask_string_is_empty_and_frees_nothing() {
+        // Exercises the null branch of the RAII guard: no CoTaskMemFree call and
+        // no panic on drop.
+        let guard = CoTaskString(PWSTR::null());
+        assert_eq!(guard.to_rust_string(), "");
+    }
 }

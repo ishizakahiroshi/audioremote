@@ -56,6 +56,11 @@ jobs:
       - name: Test
         run: cargo test --all-targets --locked
 
+      # The npm launcher is published from this same commit; a broken platform
+      # mapping or swallowed exit code must not reach the registry.
+      - name: Test npm launcher
+        run: npm test
+
   build:
     name: Build
     needs: preflight

@@ -35,11 +35,41 @@ let state = {
 const volumeControl = {
   active: false,
   draft: null,
+  // Field names the user actually changed and the server has not confirmed yet.
+  // Only these get posted: sending the whole object would write back a `muted`
+  // we never touched and silently undo a change made in Windows or by another
+  // client between two polls.
+  dirty: new Set(),
   timer: null,
   sending: false,
-  queued: null,
+  queued: false,
   revision: 0,
 };
+
+/** True while a modal sheet is open.
+ *
+ *  Polling must not re-render then. render() rebuilds #app from scratch, which
+ *  recreates the sheet — and the sheet is the scroll container, so its scrollTop
+ *  snaps back to 0 every POLL_MS. Scrolling down to the links at the bottom and
+ *  having them yanked away (or replaced mid-click) is the same defect as the
+ *  volume slider losing its drag to a poll: render() must not fire while the
+ *  user is interacting. The content behind a modal is not visible anyway, and
+ *  closing the sheet re-renders with fresh state. */
+function sheetOpen() {
+  return state.showAbout || state.showSettings;
+}
+
+/** True while a local volume interaction is still unresolved. Polling must not
+ *  overwrite the panel (or re-render it out from under the pointer) until it is. */
+function volumeInteractionInFlight() {
+  return (
+    volumeControl.active ||
+    volumeControl.timer !== null ||
+    volumeControl.sending ||
+    volumeControl.queued ||
+    volumeControl.dirty.size > 0
+  );
+}
 
 // ---------- Token from hash ----------
 
@@ -106,6 +136,14 @@ function t(key, params) {
   return s;
 }
 
+/** Like t(), but returns "" for a missing key instead of echoing the key.
+ *  For optional prose — per-crate notes, where "no note" is a valid state and
+ *  rendering "about.crate.ipnet" would be worse than rendering nothing. */
+function tOptional(key) {
+  const s = state.strings[key];
+  return typeof s === "string" ? s : "";
+}
+
 // ---------- Networking ----------
 
 async function api(path, opts = {}) {
@@ -148,7 +186,7 @@ async function pollOnce() {
     state.status = status;
     state.devices = devicesResp.devices || [];
     if (volumeResult.status === "fulfilled") {
-      if (!volumeControl.active && !volumeControl.timer && !volumeControl.sending && !volumeControl.queued) {
+      if (!volumeInteractionInFlight()) {
         state.volume = volumeResult.value;
       }
     } else if (volumeResult.reason?.message !== "unauthorized") {
@@ -159,11 +197,11 @@ async function pollOnce() {
       const d = state.devices.find((x) => x.id === state.pendingId);
       if (d && d.is_default_multimedia) state.pendingId = null;
     }
-    // Skip the full re-render while the volume slider is mid-interaction:
-    // render() rebuilds #app via innerHTML="", which would replace the
-    // <input id="volumeSlider"> node under the user's pointer and abort the
-    // drag (implicit pointer capture is released when the element is removed).
-    if (!volumeControl.active && !volumeControl.timer && !volumeControl.sending && !volumeControl.queued) {
+    // Skip the full re-render while the user is interacting with something that
+    // render() would destroy: a mid-drag volume slider (implicit pointer capture
+    // is released when the element is removed) or an open sheet (whose scroll
+    // position and in-flight clicks live in nodes innerHTML="" throws away).
+    if (!volumeInteractionInFlight() && !sheetOpen()) {
       render();
     }
   } catch (e) {
@@ -253,18 +291,31 @@ function updateVolumeDom(volume) {
   }
 }
 
+/** Body for the next POST: the dirty fields only, never the whole state.
+ *  Returns null when there is nothing left to send. */
+function nextVolumeRequest() {
+  const source = volumeControl.draft || state.volume;
+  if (!source) return null;
+  const body = {};
+  for (const key of volumeControl.dirty) {
+    if (source[key] !== undefined) body[key] = source[key];
+  }
+  if (!Object.keys(body).length) return null;
+  return { revision: volumeControl.revision, body };
+}
+
 function scheduleVolumePost() {
   if (volumeControl.timer) clearTimeout(volumeControl.timer);
   volumeControl.timer = setTimeout(() => {
     volumeControl.timer = null;
-    const draft = volumeControl.draft;
-    if (!draft) return;
-    const request = { revision: volumeControl.revision, ...draft };
+    // Rebuild the body when the in-flight request finishes rather than queueing a
+    // snapshot: edits made while it was in flight have to be included too.
     if (volumeControl.sending) {
-      volumeControl.queued = request;
-    } else {
-      void sendVolume(request);
+      volumeControl.queued = true;
+      return;
     }
+    const request = nextVolumeRequest();
+    if (request) void sendVolume(request);
   }, VOLUME_DEBOUNCE_MS);
 }
 
@@ -272,6 +323,7 @@ function updateVolumeDraft(patch) {
   const current = volumeControl.draft || state.volume;
   if (!current) return;
   volumeControl.draft = { ...current, ...patch };
+  for (const key of Object.keys(patch)) volumeControl.dirty.add(key);
   volumeControl.revision += 1;
   volumeControl.active = true;
   state.volume = { ...state.volume, ...patch };
@@ -285,6 +337,7 @@ async function refreshVolumeAfterFailure(revision) {
     if (revision !== volumeControl.revision) return;
     state.volume = volume;
     volumeControl.draft = null;
+    volumeControl.dirty.clear();
     updateVolumeDom(volume);
     render();
   } catch (e) {
@@ -298,24 +351,29 @@ async function sendVolume(request) {
     const volume = await api("/api/volume", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ level: request.level, muted: request.muted }),
+      body: JSON.stringify(request.body),
     });
     if (request.revision === volumeControl.revision) {
       state.volume = volume;
       volumeControl.draft = volume;
+      // Confirmed by the server, so these fields are no longer pending. A newer
+      // revision means the user kept going: keep them dirty for the next post.
+      volumeControl.dirty.clear();
       updateVolumeDom(volume);
     }
   } catch (e) {
     if (request.revision === volumeControl.revision) {
       volumeControl.active = false;
+      volumeControl.dirty.clear();
       toast(t("toast.volumeFailed", { msg: e.message }), "err");
       await refreshVolumeAfterFailure(request.revision);
     }
   } finally {
     volumeControl.sending = false;
-    if (volumeControl.queued) {
-      const next = volumeControl.queued;
-      volumeControl.queued = null;
+    const queued = volumeControl.queued;
+    volumeControl.queued = false;
+    const next = queued ? nextVolumeRequest() : null;
+    if (next) {
       void sendVolume(next);
     } else if (request.revision === volumeControl.revision) {
       volumeControl.active = false;
@@ -526,6 +584,7 @@ function renderSharePanel(entries) {
 }
 
 function renderDeviceCard(d) {
+  const switching = !!state.pendingId;
   const optimisticSelected = state.pendingId
     ? d.id === state.pendingId
     : d.is_default_multimedia;
@@ -534,6 +593,8 @@ function renderDeviceCard(d) {
     optimisticSelected ? "selected" : "",
     d.state !== "active" ? "dim" : "",
     state.pendingId === d.id ? "busy" : "",
+    // Every other card is locked while a switch is in flight — see the onclick.
+    switching && state.pendingId !== d.id ? "locked" : "",
   ].filter(Boolean).join(" ");
 
   const stateLabel = t("deviceState." + d.state);
@@ -552,8 +613,13 @@ function renderDeviceCard(d) {
     {
       class: cls,
       onclick: () => {
+        // One switch at a time. The server changes Console / Multimedia /
+        // Communications one role at a time, so a second request that overlaps
+        // the first can leave the three roles pointing at different devices —
+        // exactly what this app exists to prevent. The server serializes and
+        // verifies too; this just avoids provoking a guaranteed 409.
+        if (switching) return;
         if (d.state !== "active") return;
-        if (state.pendingId === d.id) return;
         if (optimisticSelected && roleNames.length === 3) return;
         setDefault(d.id);
       },
@@ -627,8 +693,10 @@ function renderSettingsSheet() {
           },
         }, t("settings.aboutOpen")),
       ),
-      h("div", { style: "text-align:right; margin-top:16px" },
-        h("button", { class: "btn ghost small", style: "margin-right:8px",
+      // Classes, not inline `style` attributes: the server sends a strict
+      // Content-Security-Policy without 'unsafe-inline'.
+      h("div", { class: "sheet-actions" },
+        h("button", { class: "btn ghost small spaced",
           onclick: () => { state.showSettings = false; render(); },
         }, t("settings.close")),
         h("button", { class: "btn small",
@@ -686,7 +754,9 @@ function renderAboutSheet() {
     h("div", { class: "about-block" },
       h("div", { class: "about-name" }, a.name || "audioremote"),
       h("div", { class: "meta" }, t("about.versionRow", { version: a.version || "?" })),
-      h("p", {}, a.description || ""),
+      // Prefer the localized copy: `description` comes from Cargo.toml, which
+      // stays English because crates.io shows it.
+      h("p", {}, tOptional("about.description") || a.description || ""),
     ),
   );
 
@@ -701,25 +771,26 @@ function renderAboutSheet() {
     ),
   );
 
-  if (a.frontend_note) {
-    sheet.append(
-      h("div", { class: "about-block" },
-        h("div", { class: "about-h" }, t("about.frontendSection")),
-        h("div", {}, a.frontend_note),
-      ),
-    );
-  }
+  sheet.append(
+    h("div", { class: "about-block" },
+      h("div", { class: "about-h" }, t("about.frontendSection")),
+      h("div", {}, t("about.frontendBody")),
+    ),
+  );
 
   const oss = state.about.oss || [];
   const listBox = h("div", { class: "about-block" },
     h("div", { class: "about-h" }, t("about.ossSection", { count: oss.length })),
   );
   oss.forEach((o) => {
+    // Facts (name / version / license) come from the server; the "why we use it"
+    // note is UI prose and therefore comes from the language pack.
+    const purpose = tOptional("about.crate." + o.name);
     listBox.append(
       h("div", { class: "oss-row" },
         h("div", { class: "oss-name" }, o.name + " " + o.version),
         h("div", { class: "oss-meta" },
-          o.license + (o.purpose ? " · " + o.purpose : "")),
+          o.license + (purpose ? " · " + purpose : "")),
       ),
     );
   });

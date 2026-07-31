@@ -3,6 +3,7 @@
 //! can use the same logic.
 
 use std::collections::HashSet;
+use std::net::IpAddr;
 
 use serde::Serialize;
 
@@ -57,12 +58,16 @@ pub fn is_virtual_iface(name: &str) -> bool {
 }
 
 /// Share entries with the token pre-embedded. Physical NICs first, virtual
-/// switches last. Empty when LAN is not exposed.
-pub fn build_share_entries(cfg: &Config) -> Vec<ShareEntry> {
+/// switches last. Empty when LAN is not exposed or there is no usable token.
+///
+/// `token` is passed in rather than read from `cfg` because the live token set
+/// can change while the server runs (see `crate::auth`), and a share URL built
+/// from a revoked token is worse than no share URL.
+pub fn build_share_entries(cfg: &Config, token: Option<&str>) -> Vec<ShareEntry> {
     if !cfg.lan_exposed() {
         return Vec::new();
     }
-    let Some(token) = cfg.share_token() else {
+    let Some(token) = token else {
         return Vec::new();
     };
     let port = cfg.server.port;
@@ -80,9 +85,27 @@ pub fn build_share_entries(cfg: &Config) -> Vec<ShareEntry> {
     entries
 }
 
-/// The URL a user on the host itself should open (loopback, auth bypassed).
+/// The URL a user on the host itself should open (auth bypassed for loopback).
+///
+/// Loopback when the server actually answers there — `0.0.0.0`, `127.0.0.1`,
+/// `localhost`. A bind pinned to one LAN address does **not** answer on
+/// 127.0.0.1, and `::`/`::1` only answer over IPv6 on Windows, so those get a
+/// URL that can really connect instead of a convenient lie.
 pub fn build_host_url(cfg: &Config) -> String {
-    format!("http://127.0.0.1:{}/", cfg.server.port)
+    let port = cfg.server.port;
+    match crate::config::parse_bind(&cfg.server.bind) {
+        Ok(IpAddr::V4(v4)) if v4.is_loopback() || v4.is_unspecified() => {
+            format!("http://127.0.0.1:{port}/")
+        }
+        Ok(IpAddr::V4(v4)) => format!("http://{v4}:{port}/"),
+        Ok(IpAddr::V6(v6)) if v6.is_loopback() || v6.is_unspecified() => {
+            format!("http://[::1]:{port}/")
+        }
+        Ok(IpAddr::V6(v6)) => format!("http://[{v6}]:{port}/"),
+        // Unparseable bind never reaches here in practice (startup validates it
+        // first); loopback is the least surprising thing to print.
+        Err(_) => format!("http://127.0.0.1:{port}/"),
+    }
 }
 
 /// Host header values accepted by the AR-02 DNS-rebinding guard, built once at
@@ -102,6 +125,17 @@ pub fn build_allowed_hosts(cfg: &Config) -> HashSet<String> {
     for (_iface, ip) in list_lan_ipv4() {
         names.push(ip.to_string());
     }
+    // A bind pinned to a single address may not appear in the enumeration above
+    // (a static IPv6 address, or a NIC the enumerator skips) — and it is exactly
+    // what the operator will type into the browser.
+    if let Ok(ip) = crate::config::parse_bind(&cfg.server.bind) {
+        if !ip.is_unspecified() {
+            names.push(match ip {
+                IpAddr::V4(v4) => v4.to_string(),
+                IpAddr::V6(v6) => format!("[{v6}]"),
+            });
+        }
+    }
     let mut set = HashSet::new();
     for name in names {
         let h = name.to_ascii_lowercase();
@@ -109,4 +143,98 @@ pub fn build_allowed_hosts(cfg: &Config) -> HashSet<String> {
         set.insert(h);
     }
     set
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(bind: &str, port: u16) -> Config {
+        let mut c = Config::default();
+        c.server.bind = bind.to_string();
+        c.server.port = port;
+        c
+    }
+
+    #[test]
+    fn host_url_points_where_the_server_actually_listens() {
+        for (bind, expected) in [
+            ("0.0.0.0", "http://127.0.0.1:17650/"),
+            ("127.0.0.1", "http://127.0.0.1:17650/"),
+            ("localhost", "http://127.0.0.1:17650/"),
+            ("::", "http://[::1]:17650/"),
+            ("::1", "http://[::1]:17650/"),
+            ("[::1]", "http://[::1]:17650/"),
+            // Pinned to one LAN address: 127.0.0.1 would not answer at all.
+            ("203.0.113.5", "http://203.0.113.5:17650/"),
+        ] {
+            assert_eq!(build_host_url(&cfg(bind, 17650)), expected, "bind = {bind}");
+        }
+    }
+
+    #[test]
+    fn share_entries_need_both_lan_exposure_and_a_token() {
+        assert!(
+            build_share_entries(&cfg("127.0.0.1", 17650), Some("ar_live_x")).is_empty(),
+            "host-only bind must not advertise share URLs"
+        );
+        assert!(
+            build_share_entries(&cfg("0.0.0.0", 17650), None).is_empty(),
+            "no usable token means no share URL"
+        );
+
+        // The machine's own NIC list is environment-dependent, so assert the shape
+        // of whatever comes back rather than the count.
+        for entry in build_share_entries(&cfg("0.0.0.0", 17650), Some("ar_live_x")) {
+            assert!(entry.url.starts_with("http://"), "{}", entry.url);
+            assert!(entry.url.contains(":17650/#t=ar_live_x"), "{}", entry.url);
+        }
+    }
+
+    #[test]
+    fn allowed_hosts_cover_loopback_names_with_and_without_the_port() {
+        let hosts = build_allowed_hosts(&cfg("0.0.0.0", 17650));
+        for expected in [
+            "127.0.0.1",
+            "127.0.0.1:17650",
+            "localhost",
+            "localhost:17650",
+            "::1",
+            "[::1]",
+            "[::1]:17650",
+        ] {
+            assert!(hosts.contains(expected), "missing {expected}: {hosts:?}");
+        }
+        assert!(!hosts.contains("evil.example"));
+        // `0.0.0.0` is a wildcard, not something a browser ever sends as Host.
+        assert!(!hosts.contains("0.0.0.0"));
+    }
+
+    #[test]
+    fn allowed_hosts_include_a_pinned_bind_address() {
+        let v4 = build_allowed_hosts(&cfg("203.0.113.5", 17650));
+        assert!(v4.contains("203.0.113.5"));
+        assert!(v4.contains("203.0.113.5:17650"));
+
+        let v6 = build_allowed_hosts(&cfg("2001:db8::1", 17650));
+        assert!(v6.contains("[2001:db8::1]"));
+        assert!(v6.contains("[2001:db8::1]:17650"));
+    }
+
+    #[test]
+    fn virtual_interfaces_are_recognised_by_name() {
+        for name in [
+            "vEthernet (Default Switch)",
+            "WSL (Hyper-V firewall)",
+            "Docker Desktop",
+            "VirtualBox Host-Only Network",
+            "Bluetooth Network Connection",
+            "VMware Network Adapter VMnet1",
+        ] {
+            assert!(is_virtual_iface(name), "{name}");
+        }
+        for name in ["Ethernet", "Wi-Fi", "イーサネット 2"] {
+            assert!(!is_virtual_iface(name), "{name}");
+        }
+    }
 }
