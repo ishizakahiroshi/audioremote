@@ -44,7 +44,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 - `bin/audioremote.js` / `test/launcher.test.mjs` — npm ランチャーとその node:test
 - `Cargo.toml` — パッケージ定義（`name = "audioremote"` / `version = "0.1.0"`。crates.io には予約用 `0.0.0` と本リリース `0.1.0` が併存）
 - `docs/local/` — plan / recap / bugfix / pending（**gitignore・非公開**。"local" の名のとおり追跡しない。公開したい開発ドキュメントは `docs/` 直下へ置く）
-  - `archive/v0.1.0/` — v0.1.0 リリースサイクルの全記録（release md / v0.1 実装計画 / 監査 2 件 / bugfix 2 件）。2026-07-31 のリリース完了時に集約
+  - `archive/v0.1.x/` — **v0.1 系（0.1.0 以降）のリリースサイクル全記録**をまとめる箱（release md / 実装計画 / 監査 2 件 / bugfix 3 件）。patch リリースの記録も同じ箱へ入れる
 - `scripts/` — `secrets-scan.mjs` / `install-hooks.{sh,ps1}`
 - `.githooks/` — layer 2 pre-commit（`core.hooksPath = .githooks` で有効化）
 - `.github/workflows/` — layer 3 CI (`secrets-scan.yml`)
@@ -74,7 +74,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 
 このリポジトリ固有:
 
-- **v0.1 は 2026-07-31 に v0.1.0 としてリリース済み**（npm / crates.io / GitHub Releases の 3 チャネル）。当時の実装計画と全記録は `docs/local/archive/v0.1.0/`。次の作業単位は `docs/local/plan_audioremote-roadmap.md` の v0.2 節に従う
+- **v0.1 は 2026-07-31 に v0.1.0 としてリリース済み**（npm / crates.io / GitHub Releases の 3 チャネル）。当時の実装計画と全記録は `docs/local/archive/v0.1.x/`。次の作業単位は `docs/local/plan_audioremote-roadmap.md` の v0.2 節に従う
 - **音声デバイス切替は必ず Windows のデバイス ID で行う**（表示名は再接続等で変わりうる）
 - **切替 API は 3 役割（Console/Multimedia/Communications）まとめて変更する**（個別切替は v0.1 スコープ外）。`IPolicyConfig` は 1 役割ずつ設定するため、**切替後に 3 役割を再列挙して照合し、分裂していれば 409 を返す**。並行切替は `AudioGate` で直列化する（新しい音声操作を追加する時も必ず gate 経由にする）
 - **loopback は token をバイパスするため、状態変更 API には same-origin 検証（`Sec-Fetch-Site` / `Origin`）が必須**。これを外すと任意の Web ページからホストの出力先を切り替えられる（CSRF）
@@ -101,5 +101,5 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 | ユーザー向け README | `README.md` |
 | Codex/他 AI 用入口 | `AGENTS.md` |
 | ロードマップ（v0.1 → v0.2 → v0.3+ の正典） | `docs/local/plan_audioremote-roadmap.md` |
-| v0.1.0 リリースサイクルの全記録 | `docs/local/archive/v0.1.0/` |
+| v0.1 系のリリースサイクル全記録 | `docs/local/archive/v0.1.x/` |
 | ホストへのデプロイ手順 | `docs/local/setup_host-deploy-pipeline.md` |
