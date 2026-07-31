@@ -86,8 +86,7 @@ async function loadLang(code) {
 
 async function bootI18n() {
   try {
-    const res = await fetch("/api/languages");
-    if (res.ok) state.langs = await res.json();
+    state.langs = await api("/api/languages");
   } catch (_) {
     state.langs = [{ code: "en", name: "English" }];
   }
