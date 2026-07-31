@@ -33,7 +33,10 @@ impl History {
 pub fn load(path: &Path) -> std::io::Result<History> {
     match fs::read_to_string(path) {
         Ok(s) => toml::from_str(&s).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("history parse: {e}"))
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("history parse: {e}"),
+            )
         }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(History::default()),
         Err(e) => Err(e),
@@ -45,7 +48,10 @@ pub fn save(path: &Path, history: &History) -> std::io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     let text = toml::to_string_pretty(history).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("history write: {e}"))
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("history write: {e}"),
+        )
     })?;
     fs::write(path, text)
 }

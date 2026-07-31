@@ -5,13 +5,13 @@
 
 use windows::core::PWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
+use windows::Win32::Foundation::{BOOL, E_INVALIDARG};
+use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     eCommunications, eConsole, eMultimedia, eRender, ERole, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, DEVICE_STATE, DEVICE_STATE_ACTIVE,
-    DEVICE_STATE_DISABLED, DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
+    MMDeviceEnumerator, DEVICE_STATE, DEVICE_STATE_ACTIVE, DEVICE_STATE_DISABLED,
+    DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
 };
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
-use windows::Win32::Foundation::{BOOL, E_INVALIDARG};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
 };
@@ -93,7 +93,10 @@ impl std::error::Error for AudioError {}
 type Result<T> = std::result::Result<T, AudioError>;
 
 fn wrap<T>(ctx: &'static str, r: windows::core::Result<T>) -> Result<T> {
-    r.map_err(|e| AudioError { context: ctx, source: e })
+    r.map_err(|e| AudioError {
+        context: ctx,
+        source: e,
+    })
 }
 
 /// RAII guard for CoInitializeEx / CoUninitialize (MTA). Nested creation is
@@ -171,7 +174,9 @@ pub fn list_devices() -> Result<Vec<AudioDevice>> {
     let collection = wrap("EnumAudioEndpoints", unsafe {
         enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE(mask))
     })?;
-    let count = wrap("IMMDeviceCollection::GetCount", unsafe { collection.GetCount() })?;
+    let count = wrap("IMMDeviceCollection::GetCount", unsafe {
+        collection.GetCount()
+    })?;
 
     let default_ids = current_defaults(&enumerator);
 
@@ -254,11 +259,13 @@ fn default_multimedia_volume() -> Result<(String, IAudioEndpointVolume)> {
 }
 
 fn read_master_volume(device_id: String, endpoint: &IAudioEndpointVolume) -> Result<MasterVolume> {
-    let level = wrap(
-        "IAudioEndpointVolume::GetMasterVolumeLevelScalar",
-        unsafe { endpoint.GetMasterVolumeLevelScalar() },
-    )?;
-    let muted = wrap("IAudioEndpointVolume::GetMute", unsafe { endpoint.GetMute() })?.0 != 0;
+    let level = wrap("IAudioEndpointVolume::GetMasterVolumeLevelScalar", unsafe {
+        endpoint.GetMasterVolumeLevelScalar()
+    })?;
+    let muted = wrap("IAudioEndpointVolume::GetMute", unsafe {
+        endpoint.GetMute()
+    })?
+    .0 != 0;
     Ok(MasterVolume {
         device_id,
         level,
@@ -276,7 +283,10 @@ pub fn get_master_volume() -> Result<MasterVolume> {
 /// Update either or both master-volume fields and return the resulting state.
 /// This is kept crate-visible so the HTTP layer can apply a combined request
 /// in one endpoint activation without exposing COM types.
-pub(crate) fn update_master_volume(level: Option<f32>, muted: Option<bool>) -> Result<MasterVolume> {
+pub(crate) fn update_master_volume(
+    level: Option<f32>,
+    muted: Option<bool>,
+) -> Result<MasterVolume> {
     if level.is_none() && muted.is_none() {
         return Err(invalid_volume_level());
     }
@@ -287,16 +297,14 @@ pub(crate) fn update_master_volume(level: Option<f32>, muted: Option<bool>) -> R
     let _com = ComGuard::new()?;
     let (id, endpoint) = default_multimedia_volume()?;
     if let Some(level) = level {
-        wrap(
-            "IAudioEndpointVolume::SetMasterVolumeLevelScalar",
-            unsafe { endpoint.SetMasterVolumeLevelScalar(level, std::ptr::null()) },
-        )?;
+        wrap("IAudioEndpointVolume::SetMasterVolumeLevelScalar", unsafe {
+            endpoint.SetMasterVolumeLevelScalar(level, std::ptr::null())
+        })?;
     }
     if let Some(muted) = muted {
-        wrap(
-            "IAudioEndpointVolume::SetMute",
-            unsafe { endpoint.SetMute(BOOL(muted as i32), std::ptr::null()) },
-        )?;
+        wrap("IAudioEndpointVolume::SetMute", unsafe {
+            endpoint.SetMute(BOOL(muted as i32), std::ptr::null())
+        })?;
     }
     read_master_volume(id, &endpoint)
 }

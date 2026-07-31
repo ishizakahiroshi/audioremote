@@ -18,15 +18,13 @@ use windows::Win32::Media::Audio::{eCommunications, eConsole, eMultimedia, ERole
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
 // CLSID_CPolicyConfigClient
-const CLSID_POLICY_CONFIG_CLIENT: GUID =
-    GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+const CLSID_POLICY_CONFIG_CLIENT: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
 
 // IID_IPolicyConfig (Windows 10 / 11)
 const IID_IPOLICY_CONFIG: GUID = GUID::from_u128(0xf8679f50_850a_41cf_9c72_430f290290c8);
 
 // IID_IPolicyConfigVista (older shape, kept for defensive fallback)
-const IID_IPOLICY_CONFIG_VISTA: GUID =
-    GUID::from_u128(0x568b9108_44bf_40b4_9006_86afe5b5a620);
+const IID_IPOLICY_CONFIG_VISTA: GUID = GUID::from_u128(0x568b9108_44bf_40b4_9006_86afe5b5a620);
 
 /// Vtable layout common to both IPolicyConfig and IPolicyConfigVista at the
 /// slots we care about. The methods before SetDefaultEndpoint are opaque —
@@ -55,11 +53,8 @@ struct IPolicyConfigVtbl {
     _set_property_value: *const c_void,    // 12
 
     // Slot 13 — the one we need.
-    set_default_endpoint: unsafe extern "system" fn(
-        this: *mut c_void,
-        device_id: PCWSTR,
-        role: ERole,
-    ) -> HRESULT,
+    set_default_endpoint:
+        unsafe extern "system" fn(this: *mut c_void, device_id: PCWSTR, role: ERole) -> HRESULT,
 
     _set_endpoint_visibility: *const c_void, // 14
 }
@@ -80,11 +75,7 @@ impl PolicyConfig {
         for iid in [IID_IPOLICY_CONFIG, IID_IPOLICY_CONFIG_VISTA] {
             let mut raw: *mut c_void = ptr::null_mut();
             let hr = unsafe {
-                (Interface::vtable(&unknown).QueryInterface)(
-                    unknown.as_raw(),
-                    &iid,
-                    &mut raw,
-                )
+                (Interface::vtable(&unknown).QueryInterface)(unknown.as_raw(), &iid, &mut raw)
             };
             if hr.is_ok() && !raw.is_null() {
                 // Vtable pointer is the first field of a COM object.
@@ -93,14 +84,15 @@ impl PolicyConfig {
             }
         }
         // Fall through: return the last-attempt error.
-        Err(windows::core::Error::from_hresult(HRESULT(0x80004002u32 as i32))) // E_NOINTERFACE
+        Err(windows::core::Error::from_hresult(HRESULT(
+            0x80004002u32 as i32,
+        ))) // E_NOINTERFACE
     }
 
     fn set_default_endpoint(&self, device_id: &str, role: ERole) -> windows::core::Result<()> {
         let wide: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
-        let hr = unsafe {
-            ((*self.vtbl).set_default_endpoint)(self.raw, PCWSTR(wide.as_ptr()), role)
-        };
+        let hr =
+            unsafe { ((*self.vtbl).set_default_endpoint)(self.raw, PCWSTR(wide.as_ptr()), role) };
         if hr.is_ok() {
             Ok(())
         } else {

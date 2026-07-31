@@ -167,7 +167,10 @@ pub fn load_or_init(path: &Path) -> std::io::Result<(Config, bool)> {
     let existed = path.exists();
     let mut config: Config = match fs::read_to_string(path) {
         Ok(s) => toml::from_str(&s).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("config parse: {e}"))
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("config parse: {e}"),
+            )
         })?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
         Err(e) => return Err(e),
@@ -213,7 +216,10 @@ pub fn load_or_init(path: &Path) -> std::io::Result<(Config, bool)> {
 
 pub fn save(path: &Path, config: &Config) -> std::io::Result<()> {
     let text = toml::to_string_pretty(config).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("config write: {e}"))
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("config write: {e}"),
+        )
     })?;
     fs::write(path, text)
 }
