@@ -4,7 +4,7 @@ Switch your **Windows 11 host's default audio output device** from any browser o
 No more walking back to the host to change the output from Nest Hub Max to wired earphones
 during a meeting — do it from a Hyper-V guest, WSL2, your phone, or another PC.
 
-> Status: **v0.1 in development**. Not yet released.
+> Status: **v0.1.0 released** (2026-07-31) on npm, crates.io and GitHub Releases.
 
 ---
 
@@ -33,16 +33,32 @@ Physical devices (Nest Hub Max / wired earphones / headphones / …)
 | Server (host) | **Windows 11 only.** Windows 10 is not officially supported. macOS / Linux are out of scope. |
 | Client (browser) | Any modern browser on any OS. The built-in Web UI is served by the host binary. |
 
-## Install (planned — not yet published)
+## Install
 
-Two entry points are planned for v0.1:
+**npm** (primary — no Rust toolchain needed):
 
-- **npm** (primary): `npm i -g audioremote` or one-off `npx audioremote`
-  - Ships the platform-specific Rust binary via `optionalDependencies` (esbuild / Biome style).
-  - Package-manager installs skip Mark of the Web, so SmartScreen warnings are avoided.
-- **GitHub Releases** (secondary): direct `audioremote.exe` + `SHA256SUMS.txt` for Node-free users.
+```powershell
+npm i -g audioremote
+# or run it once without installing:
+npx audioremote
+```
 
-Neither channel is live yet. Names are reserved on all three: npm `audioremote`, crates.io `audioremote@0.0.0` (reservation only — real releases start at `0.1.0`), and this GitHub repo.
+The platform-specific Rust binary ships via `optionalDependencies` (esbuild / Biome style), so
+`npm i` pulls the right executable for your machine. Package-manager installs skip Mark of the Web,
+so SmartScreen warnings are avoided.
+
+**GitHub Releases** (Node-free): download `audioremote-win32-x64.zip` from the
+[latest release](https://github.com/ishizakahiroshi/audioremote/releases/latest), verify it against
+the published `SHA256SUMS.txt`, and run the extracted `audioremote.exe`.
+
+**crates.io** (builds from source, needs Rust 1.85+):
+
+```powershell
+cargo install audioremote
+```
+
+All three are live as of v0.1.0. The binary is **unsigned** — see Security posture for why the npm
+channel is the recommended path.
 
 ## Build from source (developer)
 

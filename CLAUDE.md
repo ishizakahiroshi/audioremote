@@ -42,10 +42,9 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 - `src/auth.rs` — 稼働中の token 集合（config.toml 変更を mtime 監視で再読込）
 - `src/audio/` — Core Audio ラッパー。`GetId` の `PWSTR` は `CoTaskString` で必ず `CoTaskMemFree`
 - `bin/audioremote.js` / `test/launcher.test.mjs` — npm ランチャーとその node:test
-- `Cargo.toml` — パッケージ定義（`name = "audioremote"` / `version = "0.0.0"` 予約占有中・本リリースは `0.1.0` から）
+- `Cargo.toml` — パッケージ定義（`name = "audioremote"` / `version = "0.1.0"`。crates.io には予約用 `0.0.0` と本リリース `0.1.0` が併存）
 - `docs/local/` — plan / recap / bugfix / pending（**gitignore・非公開**。"local" の名のとおり追跡しない。公開したい開発ドキュメントは `docs/` 直下へ置く）
-  - `plan_audioremote-v0.1-volume-autostart.md` — v0.1 残作業（マスター音量・ミュート + autostart）の実装計画（正本）
-  - `recap_2026-07-24_audioremote-naming-reserve.md` — 命名確定・3 チャネル名前予約・クライアント形決定
+  - `archive/v0.1.0/` — v0.1.0 リリースサイクルの全記録（release md / v0.1 実装計画 / 監査 2 件 / bugfix 2 件）。2026-07-31 のリリース完了時に集約
 - `scripts/` — `secrets-scan.mjs` / `install-hooks.{sh,ps1}`
 - `.githooks/` — layer 2 pre-commit（`core.hooksPath = .githooks` で有効化）
 - `.github/workflows/` — layer 3 CI (`secrets-scan.yml`)
@@ -75,14 +74,14 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 
 このリポジトリ固有:
 
-- **v0.1 の作業単位は `docs/local/plan_audioremote-v0.1-volume-autostart.md` の C1〜C5 に従う**（実行順序: C1 → C2 → C3 → C4 → C5）
+- **v0.1 は 2026-07-31 に v0.1.0 としてリリース済み**（npm / crates.io / GitHub Releases の 3 チャネル）。当時の実装計画と全記録は `docs/local/archive/v0.1.0/`。次の作業単位は `docs/local/plan_audioremote-roadmap.md` の v0.2 節に従う
 - **音声デバイス切替は必ず Windows のデバイス ID で行う**（表示名は再接続等で変わりうる）
 - **切替 API は 3 役割（Console/Multimedia/Communications）まとめて変更する**（個別切替は v0.1 スコープ外）。`IPolicyConfig` は 1 役割ずつ設定するため、**切替後に 3 役割を再列挙して照合し、分裂していれば 409 を返す**。並行切替は `AudioGate` で直列化する（新しい音声操作を追加する時も必ず gate 経由にする）
 - **loopback は token をバイパスするため、状態変更 API には same-origin 検証（`Sec-Fetch-Site` / `Origin`）が必須**。これを外すと任意の Web ページからホストの出力先を切り替えられる（CSRF）
 - **token を stdout に出す既定を作らない**（起動バナー・`token list` はマスク。全表示は `audioremote share` / `token list --show` の明示操作のみ）
 - **サーバーはログオンユーザーのセッションで動かす**（SYSTEM サービスにしない。音声デバイスは対話ユーザー所属のため）
 - **HTTP bind の既定は `0.0.0.0`（LAN 公開・2026-07-24 LAN-first 転換）**。非 loopback クライアントは Bearer トークン必須・loopback（ホスト自身）は素通し。`127.0.0.1` に閉じたい場合は `audioremote setup`。Host ヘッダ許可リストで DNS rebinding を防ぎ、`allowed_networks`（CIDR）で送信元 IP を絞れる
-- **`crates.io` 版の `0.0.x` は予約占有用**。本リリースは `0.1.0` から（yank しても名前は永久占有される点に注意）
+- **`crates.io` の `0.0.0` は予約占有用**（本リリースは `0.1.0` 以降）。yank しても名前は永久占有される点に注意
 
 ## secrets-scan（このリポジトリの配線）
 
@@ -101,5 +100,6 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 |---|---|
 | ユーザー向け README | `README.md` |
 | Codex/他 AI 用入口 | `AGENTS.md` |
-| v0.1 実装計画（正本） | `docs/local/plan_audioremote-v0.1-volume-autostart.md` |
-| 命名・配布方針の経緯 | `docs/local/recap_2026-07-24_audioremote-naming-reserve.md` |
+| ロードマップ（v0.1 → v0.2 → v0.3+ の正典） | `docs/local/plan_audioremote-roadmap.md` |
+| v0.1.0 リリースサイクルの全記録 | `docs/local/archive/v0.1.0/` |
+| ホストへのデプロイ手順 | `docs/local/setup_host-deploy-pipeline.md` |
