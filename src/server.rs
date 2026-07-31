@@ -49,7 +49,10 @@ pub async fn serve(state: AppState) -> Result<(), std::io::Error> {
         .route("/api/volume", get(volume_handler).post(set_volume_handler))
         .route("/api/about", get(about_handler))
         .route("/api/languages", get(languages_handler))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .fallback(static_handler)
         .with_state(state);
 
@@ -73,6 +76,7 @@ async fn shutdown_signal() {
 #[derive(Serialize)]
 struct StatusBody {
     version: &'static str,
+    build_id: &'static str,
     bind: String,
     port: u16,
     lan_exposed: bool,
@@ -100,6 +104,7 @@ async fn status_handler(
     };
     let body = StatusBody {
         version: env!("CARGO_PKG_VERSION"),
+        build_id: env!("AUDIOREMOTE_BUILD_ID"),
         bind: state.config.server.bind.clone(),
         port: state.config.server.port,
         lan_exposed: state.config.lan_exposed(),
@@ -134,7 +139,7 @@ async fn devices_handler(State(state): State<AppState>) -> Response {
     let sort = state.config.audio.device_sort;
     match sort {
         SortPolicy::State => sort_by_state(&mut devices),
-        SortPolicy::Name => devices.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+        SortPolicy::Name => devices.sort_by_key(|a| a.name.to_lowercase()),
         SortPolicy::Recent => {
             let history = state.history.lock().await;
             devices.sort_by(|a, b| {
@@ -197,9 +202,7 @@ async fn volume_handler() -> Response {
     }
 }
 
-async fn set_volume_handler(
-    body: Result<Json<VolumePatch>, JsonRejection>,
-) -> Response {
+async fn set_volume_handler(body: Result<Json<VolumePatch>, JsonRejection>) -> Response {
     let Json(patch) = match body {
         Ok(body) => body,
         Err(e) => return bad_request(&format!("invalid JSON body: {e}")),
@@ -422,7 +425,7 @@ fn bad_request(message: &str) -> Response {
 }
 
 fn sort_by_state(devices: &mut [AudioDevice]) {
-    devices.sort_by(|a, b| state_rank(a).cmp(&state_rank(b)));
+    devices.sort_by_key(state_rank);
 }
 
 fn state_rank(d: &AudioDevice) -> u8 {

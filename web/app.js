@@ -160,7 +160,13 @@ async function pollOnce() {
       const d = state.devices.find((x) => x.id === state.pendingId);
       if (d && d.is_default_multimedia) state.pendingId = null;
     }
-    render();
+    // Skip the full re-render while the volume slider is mid-interaction:
+    // render() rebuilds #app via innerHTML="", which would replace the
+    // <input id="volumeSlider"> node under the user's pointer and abort the
+    // drag (implicit pointer capture is released when the element is removed).
+    if (!volumeControl.active && !volumeControl.timer && !volumeControl.sending && !volumeControl.queued) {
+      render();
+    }
   } catch (e) {
     if (e.message === "unauthorized") return;
     console.warn("poll failed:", e);
@@ -593,7 +599,7 @@ function renderSettingsSheet() {
       ),
       h("div", { class: "row" },
         h("div", { class: "label" }, t("settings.version")),
-        h("div", { class: "val" }, s.version || "?"),
+        h("div", { class: "val" }, s.version ? s.version + (s.build_id ? " (" + s.build_id + ")" : "") : "?"),
       ),
       h("div", { class: "row" },
         h("div", { class: "label" }, t("settings.sort")),

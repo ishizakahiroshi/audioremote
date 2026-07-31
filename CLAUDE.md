@@ -39,7 +39,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 - `src/main.rs` — バイナリ crate エントリ（現状は crates.io 予約用 Hello world スタブ）
 - `Cargo.toml` — パッケージ定義（`name = "audioremote"` / `version = "0.0.0"` 予約占有中・本リリースは `0.1.0` から）
 - `docs/local/` — plan / recap / bugfix / pending（**gitignore・非公開**。"local" の名のとおり追跡しない。公開したい開発ドキュメントは `docs/` 直下へ置く）
-  - `plan_audioremote-v0.1.md` — v0.1 の作業分割（C1〜C5）と API 仕様の正本
+  - `plan_audioremote-v0.1-volume-autostart.md` — v0.1 残作業（マスター音量・ミュート + autostart）の実装計画（正本）
   - `recap_2026-07-24_audioremote-naming-reserve.md` — 命名確定・3 チャネル名前予約・クライアント形決定
 - `scripts/` — `secrets-scan.mjs` / `install-hooks.{sh,ps1}`
 - `.githooks/` — layer 2 pre-commit（`core.hooksPath = .githooks` で有効化）
@@ -69,7 +69,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 
 このリポジトリ固有:
 
-- **v0.1 の作業単位は `docs/local/plan_audioremote-v0.1.md` の C1〜C5 に従う**（実行順序: C1 → C2 → (C3, C4) → C5）
+- **v0.1 の作業単位は `docs/local/plan_audioremote-v0.1-volume-autostart.md` の C1〜C5 に従う**（実行順序: C1 → C2 → C3 → C4 → C5）
 - **音声デバイス切替は必ず Windows のデバイス ID で行う**（表示名は再接続等で変わりうる）
 - **切替 API は 3 役割（Console/Multimedia/Communications）まとめて変更する**（個別切替は v0.1 スコープ外）
 - **サーバーはログオンユーザーのセッションで動かす**（SYSTEM サービスにしない。音声デバイスは対話ユーザー所属のため）
@@ -93,5 +93,5 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 |---|---|
 | ユーザー向け README | `README.md` |
 | Codex/他 AI 用入口 | `AGENTS.md` |
-| v0.1 実装計画（正本） | `docs/local/plan_audioremote-v0.1.md` |
+| v0.1 実装計画（正本） | `docs/local/plan_audioremote-v0.1-volume-autostart.md` |
 | 命名・配布方針の経緯 | `docs/local/recap_2026-07-24_audioremote-naming-reserve.md` |

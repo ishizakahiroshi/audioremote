@@ -17,6 +17,7 @@ use cargo_metadata::{DependencyKind, MetadataCommand};
 
 fn main() {
     embed_windows_resource();
+    emit_build_id();
 
     let meta = MetadataCommand::new()
         .exec()
@@ -71,6 +72,36 @@ fn main() {
     println!("cargo:rerun-if-changed=Cargo.lock");
 }
 
+/// Stamp the binary with the git short hash it was built from (plus a
+/// `-dirty` suffix when the working tree had uncommitted changes), so a
+/// running instance's origin can be told apart from a rebuild without
+/// relying on `Cargo.toml`'s version, which does not change every build.
+/// Falls back to `"unknown"` when git is unavailable (e.g. a release
+/// tarball built outside a git checkout).
+fn emit_build_id() {
+    let hash = std::process::Command::new("git")
+        .args(["rev-parse", "--short=8", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let dirty = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .is_some_and(|o| o.status.success() && !o.stdout.is_empty());
+
+    let build_id = if dirty { format!("{hash}-dirty") } else { hash };
+    println!("cargo:rustc-env=AUDIOREMOTE_BUILD_ID={build_id}");
+    // The git hash/dirty state can't be tracked by file mtime, so always
+    // let cargo decide whether a rebuild is otherwise needed.
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/index");
+}
+
 /// Embed the app icon + metadata into the .exe as a Windows resource so the
 /// binary shows the correct icon in Explorer, taskbar, Alt-Tab, and its
 /// Properties dialog. No-ops on non-Windows targets and when the `.ico` is
@@ -94,7 +125,10 @@ fn embed_windows_resource() {
 
     let mut res = winresource::WindowsResource::new();
     res.set_icon(icon_path);
-    res.set("FileDescription", "audioremote — Windows 11 audio output remote");
+    res.set(
+        "FileDescription",
+        "audioremote — Windows 11 audio output remote",
+    );
     res.set("ProductName", "audioremote");
     res.set(
         "LegalCopyright",
