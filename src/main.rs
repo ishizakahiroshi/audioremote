@@ -241,7 +241,7 @@ fn print_startup_banner(
 
     if !share_entries.is_empty() {
         println!();
-        println!("  Open on your other machine (guest Win11 / phone / VM) — token embedded:");
+        println!("  Open on your other machine (guest Win11 / phone / VM) - token embedded:");
         for e in share_entries {
             let tag = if e.virtual_iface {
                 "  [virtual switch]"
