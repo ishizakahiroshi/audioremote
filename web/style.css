@@ -239,6 +239,15 @@ body {
 .oss-name { font-weight: 700; font-size: 0.94rem; }
 .oss-meta { color: var(--ink-soft); font-size: 0.82rem; margin-top: 2px; }
 
+.about-link {
+  display: block; padding: 9px 4px; border-top: 1px dashed var(--line);
+  color: var(--ink); font-weight: 700; font-size: 0.94rem; text-decoration: none;
+}
+.about-link:first-of-type { border-top: 0; }
+.about-link::after { content: " ↗"; color: var(--ink-soft); font-weight: 400; }
+.about-link:hover { color: var(--accent); text-decoration: underline; }
+.about-note { color: var(--ink-soft); font-size: 0.8rem; margin-top: 10px; }
+
 /* --- Toast --- */
 .toast {
   position: fixed; left: 50%; top: 16px; transform: translateX(-50%);

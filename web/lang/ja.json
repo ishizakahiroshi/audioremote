@@ -72,6 +72,13 @@
   "about.licenseBody": "{name} は {license} License で配布しています。 Copyright (c) {copyright}.",
   "about.frontendSection": "フロントエンド",
   "about.ossSection": "同梱しているオープンソースソフトウェア（Rust crates · {count} 個）",
+  "about.linksSection": "リンク",
+  "about.linkRepo": "GitHub リポジトリ",
+  "about.linkSite": "作者サイト（ishizakahiroshi.com）",
+  "about.linkReport": "不具合を報告する（GitHub Issue）",
+  "about.reportNote": "報告リンクに自動で入るのは、バージョン・ビルド・ホストの OS・ブラウザ情報の 4 点だけです。デバイス名・トークン・IP アドレスは含まれません。",
+
+  "report.template": "## 発生した操作\n\n\n## 期待した結果\n\n\n## 実際の結果\n\n\n## 環境（自動入力）\n\n- audioremote: v{version} ({build})\n- ホスト OS: {os}\n- ブラウザ: {ua}\n",
 
   "toast.switchFailed": "切替に失敗: {msg}",
   "toast.volumeFailed": "音量変更に失敗: {msg}"

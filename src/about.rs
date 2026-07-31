@@ -17,11 +17,20 @@ pub struct AboutResponse {
 pub struct AppInfo {
     pub name: &'static str,
     pub version: &'static str,
+    pub build_id: &'static str,
     pub license: &'static str,
     pub copyright: &'static str,
     pub description: &'static str,
     /// Note about the frontend (0 third-party deps).
     pub frontend_note: &'static str,
+    pub repository: &'static str,
+    pub author_site: &'static str,
+    /// Base URL the Web UI appends a pre-filled `?body=` to.
+    pub issues_new: &'static str,
+    /// Host OS summary for bug reports, e.g. `Windows 11 24H2 (build 26100,
+    /// x86_64)`. Only ever leaves the host through the authenticated
+    /// `/api/about` route.
+    pub os: String,
 }
 
 #[derive(Serialize)]
@@ -32,15 +41,24 @@ pub struct OssEntry {
     pub purpose: &'static str,
 }
 
+/// Personal site of the author. Not derivable from Cargo metadata (`homepage`
+/// points at the repository), so it is spelled out here.
+const AUTHOR_SITE: &str = "https://ishizakahiroshi.com/";
+
 pub fn build() -> AboutResponse {
     AboutResponse {
         app: AppInfo {
             name: env!("CARGO_PKG_NAME"),
             version: env!("CARGO_PKG_VERSION"),
+            build_id: env!("AUDIOREMOTE_BUILD_ID"),
             license: "MIT",
             copyright: "2026 Hiroshi Ishizaka (ishizakahiroshi)",
             description: env!("CARGO_PKG_DESCRIPTION"),
             frontend_note: "フロントエンド（HTML / CSS / JS）は外部ライブラリを一切使わず、手書きの vanilla JavaScript で実装しています。npm / bundler / フレームワーク非依存。",
+            repository: env!("CARGO_PKG_REPOSITORY"),
+            author_site: AUTHOR_SITE,
+            issues_new: concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"),
+            os: os_description(),
         },
         oss: OSS_LIST
             .iter()
@@ -52,6 +70,74 @@ pub fn build() -> AboutResponse {
             })
             .collect(),
     }
+}
+
+/// Human-readable host OS summary, e.g. `Windows 11 24H2 (build 26100,
+/// x86_64)`. Used by the Web UI's bug-report link.
+///
+/// `ProductName` is deliberately not read: it still says "Windows 10 Pro" on
+/// Windows 11, so the family is derived from the build number instead.
+#[cfg(windows)]
+fn os_description() -> String {
+    let build = registry_current_version("CurrentBuild");
+    let display = registry_current_version("DisplayVersion");
+
+    // 22000 is the first Windows 11 build. Older builds keep the neutral
+    // label — the number itself is what a bug report actually needs.
+    let family = match build.as_deref().and_then(|b| b.parse::<u32>().ok()) {
+        Some(n) if n >= 22000 => "Windows 11",
+        _ => "Windows",
+    };
+
+    let arch = std::env::consts::ARCH;
+    match (display, build) {
+        (Some(display), Some(build)) => format!("{family} {display} (build {build}, {arch})"),
+        (None, Some(build)) => format!("{family} (build {build}, {arch})"),
+        (Some(display), None) => format!("{family} {display} ({arch})"),
+        (None, None) => format!("{family} ({arch})"),
+    }
+}
+
+#[cfg(not(windows))]
+fn os_description() -> String {
+    format!("{} ({})", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// Read one REG_SZ value from `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`.
+/// Returns `None` for any failure — a missing OS string only degrades the
+/// pre-filled report, so it must never fail the About response.
+#[cfg(windows)]
+fn registry_current_version(value_name: &str) -> Option<String> {
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+
+    let name: Vec<u16> = value_name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut buf = [0u16; 128];
+    let mut size = std::mem::size_of_val(&buf) as u32;
+
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"),
+            PCWSTR(name.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return None;
+    }
+
+    // `size` comes back as the byte count written, including the trailing NUL.
+    let chars = (size as usize / 2).saturating_sub(1).min(buf.len());
+    let value = String::from_utf16_lossy(&buf[..chars]).trim().to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 /// Hand-curated "why we use this" text. Keep in sync when adding a new direct

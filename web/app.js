@@ -724,9 +724,48 @@ function renderAboutSheet() {
     );
   });
   sheet.append(listBox);
+  sheet.append(renderAboutLinks(a));
 
   bg.append(sheet);
   app.append(bg);
+}
+
+/** Build the GitHub "new issue" URL with a pre-filled body.
+ *
+ *  Only four values are ever collected: app version, build id, host OS, and
+ *  the browser UA. Device names are deliberately left out — Bluetooth
+ *  endpoints are routinely named after their owner — and so are tokens and
+ *  LAN addresses. */
+function buildIssueUrl(a) {
+  const body = t("report.template", {
+    version: a.version || "?",
+    build: a.build_id || "?",
+    os: a.os || "?",
+    ua: (navigator.userAgent || "?").slice(0, 200),
+  });
+  return a.issues_new + "?body=" + encodeURIComponent(body);
+}
+
+function renderAboutLinks(a) {
+  const box = h("div", { class: "about-block" },
+    h("div", { class: "about-h" }, t("about.linksSection")),
+  );
+
+  const links = [];
+  if (a.repository) links.push([a.repository, t("about.linkRepo")]);
+  if (a.author_site) links.push([a.author_site, t("about.linkSite")]);
+  if (a.issues_new) links.push([buildIssueUrl(a), t("about.linkReport")]);
+
+  links.forEach(([href, label]) => {
+    box.append(h("a", {
+      class: "about-link", href, target: "_blank", rel: "noopener noreferrer",
+    }, label));
+  });
+
+  if (a.issues_new) {
+    box.append(h("div", { class: "about-note" }, t("about.reportNote")));
+  }
+  return box;
 }
 
 // ---------- Toast ----------

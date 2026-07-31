@@ -72,6 +72,13 @@
   "about.licenseBody": "{name} is distributed under the {license} License. Copyright (c) {copyright}.",
   "about.frontendSection": "Frontend",
   "about.ossSection": "Bundled open-source software (Rust crates · {count})",
+  "about.linksSection": "Links",
+  "about.linkRepo": "GitHub repository",
+  "about.linkSite": "Author's site (ishizakahiroshi.com)",
+  "about.linkReport": "Report a problem (GitHub issue)",
+  "about.reportNote": "The report link pre-fills exactly four values: app version, build, host OS, and browser. Device names, tokens, and IP addresses are never included.",
+
+  "report.template": "## What I did\n\n\n## What I expected\n\n\n## What happened instead\n\n\n## Environment (pre-filled)\n\n- audioremote: v{version} ({build})\n- Host OS: {os}\n- Browser: {ua}\n",
 
   "toast.switchFailed": "Switch failed: {msg}",
   "toast.volumeFailed": "Volume change failed: {msg}"
