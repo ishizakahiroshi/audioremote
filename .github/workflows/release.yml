@@ -3,16 +3,26 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
+  # Per-channel recovery. A channel can fail on its own (a bad registry token,
+  # a rate limit) while the canonical GitHub Release is already correct, so each
+  # one has to be re-runnable without re-tagging or re-building. Check exactly
+  # the channel that needs republishing; both default to off so a dispatch never
+  # touches a channel by accident.
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag (for npm-only recovery)"
+        description: "Existing release tag to republish from (e.g. v0.1.0)"
         required: true
         type: string
       npm_only:
-        description: "Republish missing npm packages from the canonical release"
-        required: true
-        default: true
+        description: "Republish the npm packages from the canonical release"
+        required: false
+        default: false
+        type: boolean
+      crates_only:
+        description: "Republish the crate to crates.io from the tag"
+        required: false
+        default: false
         type: boolean
 
 permissions:
@@ -203,7 +213,11 @@ jobs:
   crates-publish:
     name: Publish to crates.io
     needs: github-release
-    if: ${{ github.event_name == 'push' && needs.github-release.result == 'success' }}
+    # `always()` so the manual path still runs when github-release is skipped
+    # (it only runs for tag pushes). On a tag push this stays gated on the
+    # canonical release having succeeded first — crates.io is append-only, so a
+    # version must never go out ahead of the release it belongs to.
+    if: ${{ always() && (needs.github-release.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.crates_only)) }}
     runs-on: windows-latest
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -231,7 +245,15 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          status=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/audioremote/$version")
+          # crates.io answers 403 to requests without a descriptive User-Agent.
+          # Without -A this check always fell through to "not published", so a
+          # re-run would attempt the upload and fail on a duplicate version
+          # instead of skipping cleanly.
+          status=$(curl -sS \
+            -A "audioremote-release-workflow (+https://github.com/ishizakahiroshi/audioremote)" \
+            -o /dev/null -w "%{http_code}" \
+            "https://crates.io/api/v1/crates/audioremote/$version")
+          echo "crates.io version probe: HTTP $status"
           if [[ "$status" == "200" ]]; then
             echo "already published: audioremote@$version"
             echo "skip=true" >> "$GITHUB_OUTPUT"
