@@ -2,6 +2,10 @@
 target/
 Cargo.lock.bak
 
+# === Node / npm ===
+node_modules/
+npm/platforms/*/bin/
+
 # === OS / エディタ ===
 .DS_Store
 Thumbs.db

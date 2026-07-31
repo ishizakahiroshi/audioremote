@@ -1,0 +1,32 @@
+{
+  "name": "audioremote",
+  "version": "0.1.0",
+  "description": "Switch your Windows 11 host's default audio output device from any browser on the LAN",
+  "type": "module",
+  "os": ["win32"],
+  "bin": {
+    "audioremote": "bin/audioremote.js"
+  },
+  "files": [
+    "bin/audioremote.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@ishizakahiroshi/audioremote-win32-x64": "0.1.0"
+  },
+  "keywords": ["windows", "audio", "core-audio", "remote", "endpoint", "lan"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishizakahiroshi/audioremote.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ishizakahiroshi/audioremote/issues"
+  },
+  "homepage": "https://github.com/ishizakahiroshi/audioremote#readme",
+  "license": "MIT",
+  "author": "Hiroshi Ishizaka (ishizakahiroshi)"
+}

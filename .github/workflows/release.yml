@@ -1,0 +1,238 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag (for npm-only recovery)"
+        required: true
+        type: string
+      npm_only:
+        description: "Republish missing npm packages from the canonical release"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+  id-token: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  preflight:
+    name: Release preflight
+    if: ${{ github.event_name == 'push' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Verify version single-source agreement
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]
+          version="${RELEASE_TAG#v}"
+          test "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')" = "$version"
+          test "$(node -p "require('./package.json').version")" = "$version"
+          test "$(node -p "require('./npm/platforms/win32-x64/package.json').version")" = "$version"
+      - name: Require a green Validate run for this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          conclusion=$(gh run list --workflow Validate --limit 50 --json headSha,conclusion \
+            --jq ".[] | select(.headSha == \"$GITHUB_SHA\") | .conclusion" | head -n 1)
+          test "$conclusion" = success
+      - name: Test
+        run: cargo test --all-targets --locked
+
+  build:
+    name: Build
+    needs: preflight
+    if: ${{ github.event_name == 'push' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked
+      - name: Stage canonical binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging/win32-x64
+          cp target/release/audioremote.exe staging/win32-x64/audioremote.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-win32-x64
+          path: staging
+          if-no-files-found: error
+
+  github-release:
+    name: GitHub Release
+    needs: build
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: artifacts
+          merge-multiple: true
+      - name: Create archive and checksums
+        run: |
+          set -euo pipefail
+          mkdir release
+          (cd artifacts/win32-x64 && zip -q "../../release/audioremote-win32-x64.zip" audioremote.exe)
+          (cd release && sha256sum audioremote-* > SHA256SUMS.txt)
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release/* --clobber
+          else
+            gh release create "$tag" release/* --generate-notes --title "$tag"
+          fi
+          gh release view "$tag" --json body -q .body \
+            | awk '/^## SHA256 checksums/{exit} {print}' > release-notes.md
+          {
+            printf '\n## SHA256 checksums\n\n```text\n'
+            cat release/SHA256SUMS.txt
+            printf '```\n'
+          } >> release-notes.md
+          gh release edit "$tag" --notes-file release-notes.md
+
+  npm-publish:
+    name: Publish npm packages
+    needs: [build, github-release]
+    if: ${{ always() && (needs.github-release.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.npm_only)) }}
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Check npm publish credential
+        id: npm-token
+        run: |
+          if [[ -n "$NPM_TOKEN" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "NPM_TOKEN is not configured; npm channel skipped"
+          fi
+      - uses: actions/checkout@v4
+        if: ${{ steps.npm-token.outputs.available == 'true' }}
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v4
+        if: ${{ steps.npm-token.outputs.available == 'true' }}
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Download and verify canonical release
+        if: ${{ steps.npm-token.outputs.available == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]
+          mkdir canonical
+          gh release download "$RELEASE_TAG" --dir canonical
+          (cd canonical && sha256sum --check SHA256SUMS.txt)
+          mkdir -p npm/platforms/win32-x64/bin
+          unzip -q canonical/audioremote-win32-x64.zip -d npm/platforms/win32-x64/bin
+      - name: Validate version and stage platform package
+        if: ${{ steps.npm-token.outputs.available == 'true' }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          package_version=$(node -p "require('./package.json').version")
+          test "$version" = "$package_version"
+          cp README.md LICENSE npm/platforms/win32-x64/
+      - name: Publish platform package, then root
+        if: ${{ steps.npm-token.outputs.available == 'true' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          dist_tag=latest
+          case "$version" in *-*) dist_tag=next ;; esac
+          publish_once() {
+            dir="$1"
+            name=$(node -p "require('./$dir/package.json').name")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "already published: $name@$version"
+            else
+              for attempt in 1 2 3 4 5; do
+                if npm publish "$dir" --access public --provenance --tag "$dist_tag" 2>publish.log; then
+                  return 0
+                fi
+                if ! grep -Eqi '429|rate.?limit' publish.log || [[ "$attempt" == 5 ]]; then
+                  cat publish.log >&2
+                  return 1
+                fi
+                delay=$((attempt * attempt * 15))
+                echo "npm rate limit for $name; retrying in ${delay}s"
+                sleep "$delay"
+              done
+            fi
+          }
+          publish_once "npm/platforms/win32-x64"
+          publish_once "."
+
+  crates-publish:
+    name: Publish to crates.io
+    needs: github-release
+    if: ${{ github.event_name == 'push' && needs.github-release.result == 'success' }}
+    runs-on: windows-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - name: Check crates.io publish credential
+        id: cargo-token
+        shell: bash
+        run: |
+          if [[ -n "$CARGO_REGISTRY_TOKEN" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "CARGO_REGISTRY_TOKEN is not configured; crates.io channel skipped"
+          fi
+      - uses: actions/checkout@v4
+        if: ${{ steps.cargo-token.outputs.available == 'true' }}
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ steps.cargo-token.outputs.available == 'true' }}
+      - name: Check already published
+        if: ${{ steps.cargo-token.outputs.available == 'true' }}
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          status=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/audioremote/$version")
+          if [[ "$status" == "200" ]]; then
+            echo "already published: audioremote@$version"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: cargo publish
+        if: ${{ steps.cargo-token.outputs.available == 'true' && steps.check.outputs.skip == 'false' }}
+        run: cargo publish --locked

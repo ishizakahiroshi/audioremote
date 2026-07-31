@@ -11,7 +11,7 @@ homepage = "https://github.com/ishizakahiroshi/audioremote"
 keywords = ["windows", "audio", "core-audio", "remote", "endpoint"]
 categories = ["command-line-utilities", "multimedia::audio", "os::windows-apis"]
 authors = ["Hiroshi Ishizaka (ishizakahiroshi) <ishizakahiroshi.dev@gmail.com>"]
-publish = false
+include = ["src/**", "web/**", "build.rs", "Cargo.toml", "LICENSE", "README.md"]
 
 [[bin]]
 name = "audioremote"
