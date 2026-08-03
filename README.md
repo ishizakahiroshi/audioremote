@@ -137,11 +137,17 @@ install command again.
 ## Roadmap
 
 - **v0.1** — Host server + HTTP API + built-in Web UI, including device switching,
-  master volume/mute, and minimal per-user autostart (this milestone).
-- **v0.2** — Guest-resident companion app on Windows: tray-icon popup + global hotkey for the daily meeting toggle (e.g. Nest Hub Max ⇄ wired earphones). Same HTTP API, different client.
-- **v0.3+** — Additional entry points (PWA / app window) as needed.
+  master volume/mute, and minimal per-user autostart (released 2026-07-31).
+- **v0.2** — Host-side resident UX: tray icon, full autostart (firewall rule,
+  restart and crash recovery), per-app volume, plus winget / Scoop / Microsoft
+  Store distribution. **Nothing new to install on the guest.**
+- **v0.3+** — Automatic HTTPS provisioning, and a PWA entry point on top of it
+  (a PWA needs a secure context, which plain `http://` on a LAN address is not).
 
-All clients are thin HTTP clients over the same API. The core architecture (host-resident server + HTTP API) does not change between versions.
+Guests stay on the browser. Open the share URL once and the token is kept in
+`localStorage`, so a bookmark is all you need afterwards. Shipping a native guest
+app is a non-goal (see below). The core architecture (host-resident server + HTTP
+API) does not change between versions.
 
 ## Configuration (v0.1)
 
@@ -216,18 +222,26 @@ revoke it. Accordingly:
   LAN IPs, not your proxy's hostname. Writes still work: modern browsers send
   `Sec-Fetch-Site: same-origin`, which is checked instead of comparing `Origin` to
   `Host`. A browser old enough to omit that header would need `Origin` rewritten to
-  match as well; a first-class "trusted hostname" setting is deferred to v0.2.
+  match as well; a first-class "trusted hostname" setting remains deferred and is
+  not scheduled for a specific milestone.
 - Automatic HTTPS provisioning (mkcert, self-signed helpers) stays out of scope
   for v0.1; see Non-goals.
 
 ## Non-goals (v0.1)
 
-- Tray icon / global hotkeys (that's v0.2's guest companion).
+- Tray icon (host side; planned for v0.2).
+- Global hotkeys. **Dropped for good** — this product is operated from the guest,
+  so a host-side hotkey contradicts the premise.
+- A native guest client (Tauri / iOS / Android). **Dropped for good** — guests
+  already work with nothing but a browser, so shipping an executable would only
+  add an install step and give up phone / Linux / any-device reach.
 - Per-role (Console / Multimedia / Communications) individual switching UI.
 - macOS / Linux server implementations.
 - Windows 10 official support.
 - Automatic HTTPS provisioning, mkcert integration, self-signed helpers.
-- Code signing / winget submission.
+- winget / Scoop submission (planned for v0.2).
+- Code signing (undecided; evaluated in v0.2 alongside the Microsoft Store work,
+  which needs no certificate of its own because the Store re-signs the package).
 
 ## Project layout
 

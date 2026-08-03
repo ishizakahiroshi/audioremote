@@ -14,10 +14,11 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 
 - macOS / Linux サーバー実装（Windows Core Audio 前提）
 - Windows 10 の正式対応（v0.1 は Windows 11 のみ）
-- コード署名 / winget 登録（Node 保有ユーザー向け npm 配布で SmartScreen を回避する方針。要件が出るまで deferred）
+- コード署名（v0.1 は未署名。採否は v0.2 で Azure Trusted Signing として判断する。MS Store 経路は Store が再署名するので証明書不要）
 - Console / Multimedia / Communications の**個別切替 UI**（常に 3 役割まとめて切り替える）
 - 自己署名 / mkcert 等の本格 HTTPS（v0.1 は HTTP 既定 + 任意有効化のみ）
-- ロードマップ範囲外の入口（PWA / アプリ窓等）は v0.3 以降で判断
+- **ゲスト側にインストールさせるネイティブアプリ（Tauri / iOS / Android 等）**（2026-08-03 却下・恒久）。ゲストはブラウザで完結させる。共有 URL を 1 回開けばトークンが `localStorage` に保存され以後はブックマークだけで繋がるので、exe を配ると導入手順がゼロから 1 に増えるだけで、スマホ / Linux / 別 PC が同じ URL で繋がる汎用性も失う。**ホスト側のトレイ常駐に Tauri は不要**（`tray-icon` クレートで足りる）
+- ロードマップ範囲外の入口（PWA / アプリ窓等）は v0.3 以降で判断（**PWA は HTTPS が前提**。LAN の `http://` は secure context ではないため、HTTPS 自動セットアップとセットでしか成立しない）
 
 ## 技術スタック
 
@@ -33,7 +34,8 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 | 認証 | `Authorization: Bearer <token>`（初回生成・名前付き複数トークン・失効可。`audioremote token add\|revoke\|list`）。**token だけは起動時スナップショットにせず `src/auth.rs` が mtime 監視で再読込**（失効を再起動なしで反映） |
 | MSRV | `rust-version = "1.85"`（lock 済み依存の実効下限。`validate.yml` の MSRV job で固定検証） |
 | 配布（主） | npm レジストリ（Rust exe を optionalDependencies でプラットフォーム別に同梱） |
-| 配布（副） | GitHub Releases（exe + SHA256SUMS・未署名） |
+| 配布（副） | crates.io（`cargo install audioremote`）／ GitHub Releases（exe + SHA256SUMS・未署名） |
+| 配布（v0.2 で追加予定） | winget ／ Scoop ／ Microsoft Store（ホスト exe の MSIX。Store が再署名するので証明書不要） |
 
 ## ディレクトリ構成
 
@@ -74,7 +76,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 
 このリポジトリ固有:
 
-- **v0.1 は 2026-07-31 に v0.1.0 としてリリース済み**（npm / crates.io / GitHub Releases の 3 チャネル）。当時の実装計画と全記録は `docs/local/archive/v0.1.x/`。次の作業単位は `docs/local/plan_audioremote-roadmap.md` の v0.2 節に従う
+- **v0.1 は 2026-07-31 に v0.1.0 としてリリース済み**（npm / crates.io / GitHub Releases の 3 チャネル）。当時の実装計画と全記録は `docs/local/archive/v0.1.x/`。**次の作業単位は `docs/local/plan_audioremote-v0.2-resident-ux.md`**（親 1 枚 + 子 4 枚・作業ブランチは `develop`）。版をまたぐ方針の正典は引き続き `docs/local/plan_audioremote-roadmap.md`
 - **音声デバイス切替は必ず Windows のデバイス ID で行う**（表示名は再接続等で変わりうる）
 - **切替 API は 3 役割（Console/Multimedia/Communications）まとめて変更する**（個別切替は v0.1 スコープ外）。`IPolicyConfig` は 1 役割ずつ設定するため、**切替後に 3 役割を再列挙して照合し、分裂していれば 409 を返す**。並行切替は `AudioGate` で直列化する（新しい音声操作を追加する時も必ず gate 経由にする）
 - **loopback は token をバイパスするため、状態変更 API には same-origin 検証（`Sec-Fetch-Site` / `Origin`）が必須**。これを外すと任意の Web ページからホストの出力先を切り替えられる（CSRF）

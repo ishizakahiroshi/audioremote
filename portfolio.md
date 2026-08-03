@@ -37,7 +37,7 @@ Web UI 側は**フレームワーク非依存**（vanilla JS + HTML + CSS）。n
 
 **運用モデル**: ホストで exe をダブルクリック → コンソールに LAN URL（トークン埋込）が印字 → ブラウザが自動で開く（ホスト自身は認証不要）→ ゲスト側の Chrome にその URL を貼るだけで即使える。config は `%APPDATA%\audioremote\config.toml` に自動生成、`audioremote setup` の対話ウィザードで LAN 開放・トークン再発行・並び順（state / name / recent）を切替できる。
 
-v0.1 実装中（Rust 学習を兼ねた個人 OSS）。npm 配布 + GitHub Releases exe が完成したら本公開する予定。
+**v0.1.0 リリース済み**（2026-07-31・npm / crates.io / GitHub Releases の 3 チャネル）。Rust 学習を兼ねた個人 OSS。続く v0.2 では、ホスト側のタスクトレイ常駐と autostart 完成版、アプリ別音量、winget / Scoop / Microsoft Store への配布拡張を予定している。ゲスト側は今後もブラウザだけで完結させる（インストールするものを増やさない）。
 
 ## en
 
@@ -49,4 +49,4 @@ The Web UI has **zero framework dependencies** (vanilla JS + HTML + CSS). No npm
 
 **Operating model**: double-click the exe on the host → the console prints a LAN URL with the token embedded → the browser auto-opens (host loopback bypasses auth) → paste the URL into the guest's Chrome to sign in and switch. Config is auto-generated at `%APPDATA%\audioremote\config.toml`; `audioremote setup` gives you an interactive wizard to toggle LAN mode, reissue the token, and choose device sort order (state / name / recent).
 
-v0.1 in active development (a personal OSS project doubling as a Rust learning exercise). Will be published to npm + GitHub Releases once C5 lands.
+v0.1.0 shipped on 2026-07-31 across three channels: npm, crates.io, and GitHub Releases. It's a personal OSS project doubling as a Rust learning exercise. v0.2 will add a host-side tray resident with full autostart, per-app volume, and distribution via winget / Scoop / the Microsoft Store. Guests will keep needing nothing but a browser — shipping a native guest client is a deliberate non-goal.
