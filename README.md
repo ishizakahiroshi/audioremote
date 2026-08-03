@@ -60,6 +60,32 @@ cargo install audioremote
 All three are live as of v0.1.0. The binary is **unsigned** — see Security posture for why the npm
 channel is the recommended path.
 
+## Getting started, end to end
+
+Only the **host** installs anything. The guest opens a URL and that's it — a phone, a Linux box, or
+another Windows machine all work the same way.
+
+**On the host, once:**
+
+1. Install it (see above).
+2. Run `audioremote`. It prints the LAN URL with a token embedded and opens your browser.
+3. Register autostart: `audioremote --install-autostart`.
+4. Get the shareable URL: `audioremote share`. It prints one line per network interface — pick the
+   one on the LAN your guest is actually on. A Hyper-V host lists its vEthernet adapters too, and
+   those won't be reachable from the guest.
+
+**On the guest, once:**
+
+1. Paste that URL into a browser and open it. The token rides in the URL fragment (`#t=…`), which
+   browsers never send to the server; the page reads it and keeps it in `localStorage`.
+2. Bookmark the page. From then on the bare URL is enough — there is no token to type in.
+
+**Every day:** open the bookmark and press the device you want. Console, Multimedia, and
+Communications switch together, so nothing is left routed to the old endpoint.
+
+v0.2 folds host steps 3 and 4 into a single click from the tray, and drops the console window
+entirely — see Roadmap.
+
 ## Build from source (developer)
 
 ```powershell
