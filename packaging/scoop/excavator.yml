@@ -1,0 +1,37 @@
+# Belongs in the BUCKET repository, at .github/workflows/excavator.yml — not in
+# this one. It is kept here so the bucket can be recreated from this repository
+# if it is ever lost.
+#
+# What it does: walks every manifest in the bucket, asks each one's `checkver`
+# whether a newer version exists, and if so runs its `autoupdate` block to
+# rewrite the version, URL and hash, then commits. For audioremote the hash
+# comes from the release's own SHA256SUMS.txt, so nothing is ever computed
+# twice.
+
+name: Excavator
+
+on:
+  schedule:
+    # Every six hours. Frequent enough that a release is installable the same
+    # day, rare enough that the bucket's history stays readable.
+    - cron: "23 */6 * * *"
+  # Releases are not on a schedule, so there has to be a way to say "now".
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  excavate:
+    name: Excavate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update manifests
+        uses: ScoopInstaller/GithubActions@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The commits are made by the workflow, so they need a name attached
+          # that is obviously not a person.
+          GITH_EMAIL: excavator@users.noreply.github.com
+          SKIP_UPDATED: "1"

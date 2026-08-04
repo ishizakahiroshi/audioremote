@@ -24,6 +24,11 @@ on:
         required: false
         default: false
         type: boolean
+      winget_only:
+        description: "Re-submit the winget manifest update for the tag"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -263,3 +268,64 @@ jobs:
       - name: cargo publish
         if: ${{ steps.cargo-token.outputs.available == 'true' && steps.check.outputs.skip == 'false' }}
         run: cargo publish --locked
+
+  winget-submit:
+    name: Submit winget manifest
+    needs: github-release
+    if: ${{ always() && (needs.github-release.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.winget_only)) }}
+    # Never allowed to fail the release. This opens a pull request in a
+    # repository we do not own, which then waits on Microsoft's review and their
+    # automated checks. A release is done when the artifacts are published; what
+    # happens afterwards in someone else's queue cannot retroactively make it
+    # unsuccessful. Failures still show in the log with a reason.
+    continue-on-error: true
+    runs-on: windows-latest
+    env:
+      WINGET_PKGS_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
+    steps:
+      - name: Check winget submit credential
+        id: winget-token
+        shell: bash
+        run: |
+          if [[ -n "$WINGET_PKGS_TOKEN" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "WINGET_PKGS_TOKEN is not configured; winget channel skipped"
+          fi
+
+      # Prereleases stay off winget. `winget install` with no version argument
+      # takes the newest manifest, so publishing an -rc would hand it to
+      # everyone who typed the plain command.
+      - name: Skip prereleases
+        id: channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if [[ "$version" == *-* ]]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "$version is a prerelease; winget channel skipped"
+          else
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Submit manifest update
+        if: ${{ steps.winget-token.outputs.available == 'true' && steps.channel.outputs.eligible == 'true' }}
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.channel.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Self-contained exe, so nothing has to be installed on the runner.
+          Invoke-WebRequest 'https://aka.ms/wingetcreate/latest' -OutFile wingetcreate.exe
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/audioremote-win32-x64.zip"
+          # `update` and not `new`: it edits the manifests already in
+          # winget-pkgs, which is why the first version has to be submitted by
+          # hand once (see packaging/winget/SUBMITTING.md).
+          .\wingetcreate.exe update ishizakahiroshi.AudioRemote `
+            --version $env:VERSION `
+            --urls $url `
+            --submit `
+            --token $env:WINGET_PKGS_TOKEN
