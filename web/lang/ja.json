@@ -63,8 +63,11 @@
   "settings.close": "閉じる",
   "settings.reissueToken": "トークンを入れ直す",
   "settings.tokenEmpty": "(未設定)",
+  "settings.restart": "サーバー",
+  "settings.restartButton": "再起動",
 
   "settings.reissueConfirm": "トークンを削除して入力画面に戻ります。よろしいですか?",
+  "settings.restartConfirm": "ホストの音声サーバーを再起動します。再生中の音は止まりませんが、この画面は数秒つながらなくなります。ホストに新しいビルドが置いてある場合は、このタイミングで入れ替わります。よろしいですか?",
 
   "about.title": "このアプリについて",
   "about.versionRow": "バージョン v{version} / 実行環境: Windows 11 単独",
@@ -95,5 +98,44 @@
   "report.template": "## 発生した操作\n\n\n## 期待した結果\n\n\n## 実際の結果\n\n\n## 環境（自動入力）\n\n- audioremote: v{version} ({build})\n- ホスト OS: {os}\n- ブラウザ: {ua}\n",
 
   "toast.switchFailed": "切替に失敗: {msg}",
-  "toast.volumeFailed": "音量変更に失敗: {msg}"
+  "toast.volumeFailed": "音量変更に失敗: {msg}",
+  "toast.restartRequested": "ホストのサーバーを再起動しています…",
+  "toast.restartFailed": "再起動に失敗: {msg}",
+
+  "tray.state.running": "稼働中",
+  "tray.state.restarting": "再起動待ち",
+  "tray.state.stopped": "停止中",
+  "tray.state.failed": "連続失敗のため停止",
+
+  "tray.tooltip": "AudioRemote — {state} — {address}",
+
+  "tray.menu.open": "開く",
+  "tray.menu.copyShare": "共有 URL をコピー",
+  "tray.menu.restart": "再起動",
+  "tray.menu.stop": "停止",
+  "tray.menu.start": "開始",
+  "tray.menu.quit": "終了",
+
+  "tray.share.noLan": "LAN 公開が無効です（audioremote setup で変更できます）",
+  "tray.share.noToken": "使えるトークンがありません（audioremote token add <名前>）",
+  "tray.share.noNic": "この PC にまだ LAN アドレスがありません",
+
+  "tray.welcome.title": "AudioRemote は通知領域で動いています",
+  "tray.welcome.body": "この画面を閉じても止まりません。時計の左にあるアイコンから、いつでも開けます。アイコンが見当たらないときは、時計の左の「∧」を押すと隠れたアイコンが出てきます。",
+  "tray.welcome.setupButton": "初期設定を済ませる",
+  "tray.welcome.setupNote": "サインイン時の自動起動を登録し、LAN からの接続を許可し（Windows の確認が 1 回出ます）、共有 URL をコピーします。",
+  "tray.welcome.setupNotePackaged": "共有 URL をコピーします。サインイン時の自動起動はストア版では最初から有効なので、ここでは何も変更しません。",
+  "tray.welcome.openButton": "AudioRemote を開く",
+  "tray.welcome.openNote": "既定のブラウザでこのパソコンの画面を開きます。",
+  "tray.welcome.dontShowAgain": "次回から表示しない",
+
+  "tray.callout.here": "AudioRemote はここにいます",
+
+  "tray.setup.doneTitle": "AudioRemote の初期設定",
+  "tray.setup.doneBody": "自動起動を登録し、LAN の受信を許可しました。共有 URL をクリップボードにコピーしたので、別のマシンのブラウザに貼り付けてください。\n\nこのウィンドウを閉じると、AudioRemote のアイコンを矢印で指します。以後はそのアイコンから開けます。",
+  "tray.setup.noFirewallBody": "自動起動を登録し、共有 URL をクリップボードにコピーしました。LAN の許可は行っていないため、他のマシンからまだ繋がらない場合があります。\n\nこのウィンドウを閉じると、AudioRemote のアイコンを矢印で指します。以後はそのアイコンから開けます。",
+  "tray.setup.noShareBody": "自動起動を登録しました。共有 URL はまだ作れません（LAN 公開が無効か、使えるトークンがありません）。\n\nこのウィンドウを閉じると、AudioRemote のアイコンを矢印で指します。以後はそのアイコンから開けます。",
+  "tray.setup.failedBody": "初期設定を完了できませんでした。ターミナルから audioremote --install-autostart を実行してください。\n\nAudioRemote 自体は動いています。このウィンドウを閉じると、そのアイコンを矢印で指します。",
+  "tray.setup.packagedBody": "共有 URL をクリップボードにコピーしました。別のマシンのブラウザに貼り付けてください。\n\nサインイン時の自動起動と LAN の受信許可は、ストア版では最初から有効です（自動起動はタスクマネージャーの「スタートアップ アプリ」で切り替えられます）。\n\nこのウィンドウを閉じると、AudioRemote のアイコンを矢印で指します。以後はそのアイコンから開けます。",
+  "tray.setup.packagedNoShareBody": "共有 URL はまだ作れません（LAN 公開が無効か、使えるトークンがありません）。\n\nサインイン時の自動起動と LAN の受信許可は、ストア版では最初から有効です。\n\nこのウィンドウを閉じると、AudioRemote のアイコンを矢印で指します。以後はそのアイコンから開けます。"
 }

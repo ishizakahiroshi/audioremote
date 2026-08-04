@@ -1,40 +1,78 @@
+// No console window in a release build. Debug keeps one, because `cargo run`
+// with nowhere to print is a miserable way to develop — and the attribute only
+// has to be right in the artifact people actually install.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 #[cfg(windows)]
 mod about;
+#[cfg(windows)]
+mod assets;
 #[cfg(windows)]
 mod audio;
 #[cfg(windows)]
 mod auth;
 mod autostart;
 #[cfg(windows)]
+mod callout;
+#[cfg(windows)]
 mod config;
 #[cfg(windows)]
 mod history;
+#[cfg(windows)]
+mod lang;
 #[cfg(windows)]
 mod net;
 #[cfg(windows)]
 mod server;
 #[cfg(windows)]
 mod splash;
+#[cfg(windows)]
+mod supervisor;
+#[cfg(windows)]
+mod tray;
+#[cfg(windows)]
+mod welcome;
+
+/// What a bare `audioremote.exe` does.
+///
+/// `supervise` and not `serve` since v0.2: with no console window, a
+/// double-clicked exe that only starts a server puts *nothing* on screen. The
+/// supervisor shows a notification-area icon, so the app is visibly running and
+/// reachable from the first click.
+const DEFAULT_COMMAND: &str = "supervise";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let cmd = args.get(1).map(String::as_str).unwrap_or("serve");
+    let cmd = args.get(1).map(String::as_str).unwrap_or(DEFAULT_COMMAND);
+
+    // Must happen before the first `println!`: a release build starts with no
+    // console at all, and anything printed before the attach is gone for good.
+    #[cfg(windows)]
+    if prints_to_a_terminal(cmd) {
+        attach_parent_console();
+    }
 
     match cmd {
         "--help" | "-h" | "help" => banner(),
         "--install-autostart" => run_install_autostart(),
         "--uninstall-autostart" => run_uninstall_autostart(),
+        // Internal: the elevated half of the two commands above. Deliberately
+        // absent from the banner — `elevate_self` is the only caller.
+        "--firewall-install" => run_firewall_helper(args.get(2).map(String::as_str)),
+        "--firewall-uninstall" => run_firewall_helper_uninstall(),
         "serve" => {
             let no_open = args.iter().skip(2).any(|a| a == "--no-open");
             run_serve(no_open);
         }
+        "supervise" => run_supervise(),
         "list" => run_list(),
         "set" => run_set(args.get(2).map(String::as_str)),
         "share" => run_share(),
         "token" => run_token(&args),
         "setup" | "--setup" => run_setup(),
-        // Bare `audioremote` → serve, honor --no-open if given as first arg
-        // (e.g. `audioremote --no-open`).
+        // A leading flag with no subcommand still means "serve", the way it did
+        // in v0.1 (`audioremote --no-open`). A *bare* `audioremote` no longer
+        // lands here — see `DEFAULT_COMMAND`.
         _ if cmd == "serve" || cmd.starts_with("--") || cmd.is_empty() => {
             let no_open = args.iter().skip(1).any(|a| a == "--no-open");
             run_serve(no_open);
@@ -48,6 +86,81 @@ fn main() {
     }
 }
 
+/// Whether `cmd` exists to print something at a person.
+///
+/// The exceptions matter more than the rule. `serve` and `supervise` outlive the
+/// shell that started them, and a resident process writing into a prompt
+/// somebody is still typing at is worse than staying quiet — `audioremote share`
+/// is how you get the URLs back afterwards. The firewall helpers run elevated on
+/// another desktop with no console to borrow, and answer through their exit
+/// code. Everything else, including a typo, gets a console: an error message
+/// nobody can read is the same as no error at all.
+#[cfg(windows)]
+fn prints_to_a_terminal(cmd: &str) -> bool {
+    match cmd {
+        "serve" | "supervise" | "--firewall-install" | "--firewall-uninstall" => false,
+        "--help" | "--setup" | "--install-autostart" | "--uninstall-autostart" => true,
+        // Every other `--flag`, and an empty argument, falls through to the
+        // server in `main`.
+        other => !other.starts_with("--") && !other.is_empty(),
+    }
+}
+
+/// Borrow the console of whoever launched us, if there is one.
+///
+/// Deliberately never `AllocConsole`: a window popping up would undo the very
+/// thing `windows_subsystem = "windows"` is here for. Launched from Explorer,
+/// this is a no-op and the command runs silently.
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows::Win32::System::Console::{
+        AttachConsole, GetStdHandle, SetStdHandle, ATTACH_PARENT_PROCESS, STD_ERROR_HANDLE,
+        STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+
+    /// Point one standard handle at the console — but only if it is still empty.
+    ///
+    /// `audioremote list > out.txt` arrives with a real file handle already in
+    /// place. Overwriting that would put the output on screen and leave the file
+    /// empty, which is a worse regression than the one this whole function is
+    /// fixing.
+    unsafe fn bind(id: STD_HANDLE, device: PCWSTR) {
+        if GetStdHandle(id).is_ok() {
+            return;
+        }
+        let opened = CreateFileW(
+            device,
+            GENERIC_READ.0 | GENERIC_WRITE.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            HANDLE::default(),
+        );
+        if let Ok(handle) = opened {
+            let _ = SetStdHandle(id, handle);
+        }
+    }
+
+    unsafe {
+        // Fails when there is no parent console, or when we somehow have one
+        // already. Either way there is nothing left to do.
+        if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+            return;
+        }
+        // Attaching gives us the console; it does not promise usable standard
+        // handles, and a GUI-subsystem process starts without any.
+        bind(STD_INPUT_HANDLE, w!("CONIN$"));
+        bind(STD_OUTPUT_HANDLE, w!("CONOUT$"));
+        bind(STD_ERROR_HANDLE, w!("CONOUT$"));
+    }
+}
+
 fn banner() {
     println!(
         "audioremote v{} (Windows 11 host agent)",
@@ -55,9 +168,12 @@ fn banner() {
     );
     println!();
     println!("Subcommands:");
-    println!("  audioremote               start the HTTP server (default)");
-    println!("  audioremote serve         same as above (explicit)");
-    println!("  audioremote serve --no-open   skip auto-opening the browser (for autostart)");
+    println!(
+        "  audioremote               run in the notification area, keeping the server alive (default)"
+    );
+    println!("  audioremote supervise     same as above (explicit)");
+    println!("  audioremote serve         run one server in the foreground, no tray icon");
+    println!("  audioremote serve --no-open   skip auto-opening the browser");
     println!("  audioremote setup         interactive config wizard (bind / token / sort)");
     println!("  audioremote list          list playback endpoints + current defaults");
     println!("  audioremote set <id>      switch default (Console/Multimedia/Communications)");
@@ -72,6 +188,10 @@ fn banner() {
     println!("Repository: {}", env!("CARGO_PKG_REPOSITORY"));
 }
 
+/// Register the logon entry, then ask once for the elevation the firewall rule
+/// needs. The registry half never depends on the elevated half: declining UAC
+/// costs the LAN rule, not the autostart.
+#[cfg(windows)]
 fn run_install_autostart() {
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
@@ -80,8 +200,8 @@ fn run_install_autostart() {
             std::process::exit(1);
         }
     };
-    let command = match autostart::install(&exe) {
-        Ok(command) => command,
+    let installed = match autostart::install(&exe) {
+        Ok(installed) => installed,
         Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
             eprintln!("[unsupported] {e}");
             std::process::exit(2);
@@ -92,14 +212,86 @@ fn run_install_autostart() {
         }
     };
 
+    let port = configured_port();
+
+    // The Store build shares no step with the portable one here: both halves are
+    // declared in the package manifest and installed by Windows, so there is
+    // nothing to do and no UAC prompt to raise. The one case left is a port that
+    // the manifest's firewall rule does not cover.
+    let command = match installed {
+        autostart::Installed::PackagedStartupTask => {
+            println!("AudioRemote is installed from the Microsoft Store.");
+            println!("  autostart: already on — the package declares it, and Windows starts");
+            println!("             AudioRemote at sign-in. Turn it off in Task Manager →");
+            println!("             Startup apps → AudioRemote.");
+            if port == autostart::PACKAGED_FIREWALL_PORT {
+                println!("  firewall:  already open — the package declares inbound TCP {port} on");
+                println!("             private and domain networks.");
+            } else {
+                // The manifest cannot read config.toml, so its rule is pinned to
+                // the default port. Somebody who moved the port off it has a
+                // server nothing can reach, and no way to guess why.
+                println!("  firewall:  NOT open for this port. The package only declares TCP");
+                println!(
+                    "             {}, and `audioremote setup` moved the server to {port}.",
+                    autostart::PACKAGED_FIREWALL_PORT
+                );
+                println!("             Add the rule once from an elevated prompt:");
+                println!(
+                    "               {}",
+                    autostart::firewall_command_hint(None, port)
+                );
+            }
+            return;
+        }
+        autostart::Installed::RunValue(command) => command,
+    };
+
     println!("AudioRemote autostart installed.");
     println!(r"  registry: HKCU\{}", autostart::RUN_KEY_PATH);
     println!("  value:    {}", autostart::VALUE_NAME);
     println!("  command:  {command}");
+
+    match autostart::elevate_self(&["--firewall-install", &port.to_string()]) {
+        autostart::Elevation::Done => {
+            println!("  firewall: inbound TCP {port} allowed on private and domain networks.");
+        }
+        autostart::Elevation::Declined => {
+            println!("  firewall: skipped — the elevation prompt was dismissed.");
+            println!("            Other machines cannot reach this host until an inbound");
+            println!("            rule exists. Add it later from an elevated prompt:");
+            println!(
+                "              {}",
+                autostart::firewall_command_hint(Some(&exe), port)
+            );
+        }
+        autostart::Elevation::Failed(reason) => {
+            println!("  firewall: not added ({reason}).");
+            println!("            Add it from an elevated prompt:");
+            println!(
+                "              {}",
+                autostart::firewall_command_hint(Some(&exe), port)
+            );
+        }
+    }
+
     println!("  note:     run this command again if the exe is moved.");
 }
 
+#[cfg(windows)]
 fn run_uninstall_autostart() {
+    if autostart::packaged() {
+        println!("AudioRemote is installed from the Microsoft Store.");
+        println!("  autostart: this command cannot switch it off — Windows owns it.");
+        println!("             Task Manager → Startup apps → AudioRemote → Disable.");
+        println!("  firewall:  remove the inbound rule from an elevated prompt:");
+        println!(
+            "               netsh advfirewall firewall delete rule name=\"{}\"",
+            autostart::FIREWALL_RULE_NAME
+        );
+        return;
+    }
+
     match autostart::uninstall() {
         Ok(()) => println!("AudioRemote autostart removed (if it was registered)."),
         Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
@@ -111,6 +303,66 @@ fn run_uninstall_autostart() {
             std::process::exit(1);
         }
     }
+
+    match autostart::elevate_self(&["--firewall-uninstall"]) {
+        autostart::Elevation::Done => println!("  firewall: inbound rule removed."),
+        autostart::Elevation::Declined | autostart::Elevation::Failed(_) => {
+            println!("  firewall: the inbound rule is still there — removing it needs");
+            println!("            elevation. From an elevated prompt:");
+            println!(
+                "              netsh advfirewall firewall delete rule name=\"{}\"",
+                autostart::FIREWALL_RULE_NAME
+            );
+        }
+    }
+}
+
+/// The port the resident server will actually listen on. Reading the config
+/// here (rather than assuming the default) is what keeps the firewall rule and
+/// the listener in agreement after someone runs `audioremote setup`.
+#[cfg(windows)]
+fn configured_port() -> u16 {
+    match config::load_or_init(&config::default_config_path()) {
+        Ok((cfg, _)) => cfg.server.port,
+        Err(_) => config::Config::default().server.port,
+    }
+}
+
+/// Elevated half of `--install-autostart`. Started by `elevate_self`, never by
+/// a person: the release build has no console, so the exit code is the only
+/// channel back to the caller.
+#[cfg(windows)]
+fn run_firewall_helper(port: Option<&str>) {
+    let Some(port) = port.and_then(|p| p.parse::<u16>().ok()) else {
+        eprintln!("usage: audioremote --firewall-install <port>");
+        std::process::exit(2);
+    };
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => {
+            eprintln!("cannot determine current executable: {e}");
+            std::process::exit(1);
+        }
+    };
+    // `None` in a packaged build: the exe path under `%ProgramFiles%\
+    // WindowsApps\` is stamped with the package version, so a program-scoped
+    // rule would stop matching at the next Store update.
+    let program = (!autostart::packaged()).then_some(exe.as_path());
+    if let Err(e) = autostart::firewall_install(program, port) {
+        eprintln!("cannot add the firewall rule: {e}");
+        std::process::exit(1);
+    }
+    println!("firewall rule installed for TCP {port}");
+}
+
+/// Elevated half of `--uninstall-autostart`.
+#[cfg(windows)]
+fn run_firewall_helper_uninstall() {
+    if let Err(e) = autostart::firewall_uninstall() {
+        eprintln!("cannot remove the firewall rule: {e}");
+        std::process::exit(1);
+    }
+    println!("firewall rule removed");
 }
 
 #[cfg(windows)]
@@ -188,6 +440,7 @@ fn run_serve(no_open: bool) {
         history: Arc::new(tokio::sync::Mutex::new(history_state)),
         history_path: Arc::new(history_path),
         allowed_hosts: Arc::new(allowed_hosts),
+        supervised: supervisor::is_supervised(),
     };
 
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -205,6 +458,35 @@ fn run_serve(no_open: bool) {
         eprintln!("[fatal] server: {e}");
         std::process::exit(1);
     }
+}
+
+/// Run the resident supervisor: one `serve --no-open` child, restarted on a
+/// bounded backoff. This is what the logon entry points at from v0.2 on.
+#[cfg(windows)]
+fn run_supervise() {
+    let (handle, joiner) = match supervisor::start() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[fatal] cannot start the supervisor: {e}");
+            std::process::exit(1);
+        }
+    };
+    supervisor::install_console_ctrl_handler();
+    println!("audioremote supervisor running. Ctrl+C stops it and the server together.");
+
+    // The tray owns the main thread from here: Windows delivers its messages
+    // only to the thread that created the window. Losing the icon is not worth
+    // losing the supervision, so a failure here degrades to a headless run that
+    // Ctrl+C still ends.
+    if let Err(e) = tray::run(handle.clone()) {
+        eprintln!("[warn] no notification-area icon ({e}); running without a tray.");
+    } else {
+        handle.send(supervisor::Request::Quit);
+    }
+
+    // `handle` stays in scope for the whole join: dropping the last handle is
+    // the monitor's signal that nobody can send it requests any more.
+    let _ = joiner.join();
 }
 
 #[cfg(windows)]
@@ -688,6 +970,31 @@ fn run_serve(_no_open: bool) {
     std::process::exit(1);
 }
 #[cfg(not(windows))]
+fn run_supervise() {
+    eprintln!("audioremote only runs on Windows.");
+    std::process::exit(1);
+}
+#[cfg(not(windows))]
+fn run_install_autostart() {
+    eprintln!("audioremote only runs on Windows.");
+    std::process::exit(2);
+}
+#[cfg(not(windows))]
+fn run_uninstall_autostart() {
+    eprintln!("audioremote only runs on Windows.");
+    std::process::exit(2);
+}
+#[cfg(not(windows))]
+fn run_firewall_helper(_port: Option<&str>) {
+    eprintln!("audioremote only runs on Windows.");
+    std::process::exit(2);
+}
+#[cfg(not(windows))]
+fn run_firewall_helper_uninstall() {
+    eprintln!("audioremote only runs on Windows.");
+    std::process::exit(2);
+}
+#[cfg(not(windows))]
 fn run_list() {
     eprintln!("audioremote only runs on Windows.");
     std::process::exit(1);
@@ -715,7 +1022,47 @@ fn run_token(_: &[String]) {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::{mask_share_url, mask_token, truncate};
+    use super::{mask_share_url, mask_token, prints_to_a_terminal, truncate, DEFAULT_COMMAND};
+
+    #[test]
+    fn a_bare_launch_starts_the_resident_supervisor() {
+        // The pairing that makes a double-clicked exe visible: the default lands
+        // on the tray, and the tray never borrows a console.
+        assert_eq!(DEFAULT_COMMAND, "supervise");
+        assert!(!prints_to_a_terminal(DEFAULT_COMMAND));
+    }
+
+    #[test]
+    fn only_the_printing_subcommands_borrow_a_console() {
+        for cmd in [
+            "--help",
+            "-h",
+            "help",
+            "list",
+            "set",
+            "share",
+            "token",
+            "setup",
+            "--setup",
+            "--install-autostart",
+            "--uninstall-autostart",
+            // A typo has to be readable, or the user just sees nothing happen.
+            "sevre",
+        ] {
+            assert!(prints_to_a_terminal(cmd), "{cmd} should reach a terminal");
+        }
+
+        for cmd in [
+            "serve",
+            "supervise",
+            "--no-open",
+            "--firewall-install",
+            "--firewall-uninstall",
+            "",
+        ] {
+            assert!(!prints_to_a_terminal(cmd), "{cmd:?} should stay quiet");
+        }
+    }
 
     #[test]
     fn mask_token_keeps_the_prefix_and_hides_the_secret() {

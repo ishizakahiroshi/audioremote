@@ -145,6 +145,20 @@ fn embed_windows_resource() {
 
     let mut res = winresource::WindowsResource::new();
     res.set_icon(icon_path);
+
+    // The manifest is a hard requirement, not a nicety: it declares the
+    // comctl32 v6 dependency that `TaskDialogIndirect` needs to resolve. An exe
+    // built without it does not fail at runtime — it fails to *load*, with a
+    // Windows error dialog and no clue why. So this panics rather than warns.
+    let manifest_path = "packaging/audioremote.manifest";
+    println!("cargo:rerun-if-changed={manifest_path}");
+    assert!(
+        Path::new(manifest_path).exists(),
+        "{manifest_path} is missing. It is listed in Cargo.toml's `include`, so a crates.io \
+         tarball carries it too; if it really is gone, restore it before building — the exe \
+         will not start without it."
+    );
+    res.set_manifest_file(manifest_path);
     res.set(
         "FileDescription",
         "audioremote — Windows 11 audio output remote",

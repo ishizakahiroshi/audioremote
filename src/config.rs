@@ -15,6 +15,38 @@ pub struct Config {
     pub server: ServerConfig,
     pub auth: AuthConfig,
     pub audio: AudioConfig,
+    pub tray: TrayConfig,
+}
+
+/// Host-side settings, i.e. the notification-area icon. Deliberately not shared
+/// with the Web UI's own language toggle: that one is per-browser and belongs to
+/// whoever is holding the phone, this one belongs to the machine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TrayConfig {
+    /// `auto` follows the Windows UI language; `ja` / `en` pin it.
+    pub ui_language: String,
+    /// Show the welcome window at startup.
+    ///
+    /// On until the user ticks "don't show this again" in the window itself.
+    /// Deliberately not a first-run flag: an app with no window of its own is
+    /// easy to lose track of, and deciding on someone's behalf that they have
+    /// been told enough is precisely the call that went wrong when this was a
+    /// one-shot notification.
+    pub show_welcome: bool,
+    /// Whether the one-click setup has completed at least once. Used only to
+    /// stop offering it — and its UAC prompt — to someone who already ran it.
+    pub setup_done: bool,
+}
+
+impl Default for TrayConfig {
+    fn default() -> Self {
+        Self {
+            ui_language: "auto".to_string(),
+            show_welcome: true,
+            setup_done: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

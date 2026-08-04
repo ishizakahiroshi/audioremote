@@ -63,8 +63,11 @@
   "settings.close": "Close",
   "settings.reissueToken": "Re-enter token",
   "settings.tokenEmpty": "(unset)",
+  "settings.restart": "Server",
+  "settings.restartButton": "Restart",
 
   "settings.reissueConfirm": "Delete the token and return to the entry screen. Continue?",
+  "settings.restartConfirm": "Restart the audio server on the host? Playback will not change, but this page will be offline for a few seconds. If a new build is staged on the host, it is installed now.",
 
   "about.title": "About this app",
   "about.versionRow": "Version v{version} · runtime: Windows 11 only",
@@ -95,5 +98,44 @@
   "report.template": "## What I did\n\n\n## What I expected\n\n\n## What happened instead\n\n\n## Environment (pre-filled)\n\n- audioremote: v{version} ({build})\n- Host OS: {os}\n- Browser: {ua}\n",
 
   "toast.switchFailed": "Switch failed: {msg}",
-  "toast.volumeFailed": "Volume change failed: {msg}"
+  "toast.volumeFailed": "Volume change failed: {msg}",
+  "toast.restartRequested": "Restarting the host server…",
+  "toast.restartFailed": "Restart failed: {msg}",
+
+  "tray.state.running": "Running",
+  "tray.state.restarting": "Restarting",
+  "tray.state.stopped": "Stopped",
+  "tray.state.failed": "Stopped after repeated failures",
+
+  "tray.tooltip": "AudioRemote — {state} — {address}",
+
+  "tray.menu.open": "Open AudioRemote",
+  "tray.menu.copyShare": "Copy share URL",
+  "tray.menu.restart": "Restart server",
+  "tray.menu.stop": "Stop server",
+  "tray.menu.start": "Start server",
+  "tray.menu.quit": "Quit",
+
+  "tray.share.noLan": "LAN access is off — run `audioremote setup` to enable it",
+  "tray.share.noToken": "No usable token — run `audioremote token add <name>`",
+  "tray.share.noNic": "No LAN address on this host yet",
+
+  "tray.welcome.title": "AudioRemote is running in the notification area",
+  "tray.welcome.body": "Closing this window does not stop it. Its icon sits next to the clock, and opens the app at any time. If you cannot see it, click the \"∧\" left of the clock to show hidden icons.",
+  "tray.welcome.setupButton": "Finish setting up",
+  "tray.welcome.setupNote": "Starts AudioRemote at sign-in, allows connections from your LAN (Windows asks for permission once), and copies the share URL.",
+  "tray.welcome.setupNotePackaged": "Copies the share URL. Start at sign-in is already on in the Store edition, so nothing here is changed.",
+  "tray.welcome.openButton": "Open AudioRemote",
+  "tray.welcome.openNote": "Opens this host's page in your default browser.",
+  "tray.welcome.dontShowAgain": "Don't show this again",
+
+  "tray.callout.here": "AudioRemote lives here",
+
+  "tray.setup.doneTitle": "AudioRemote setup",
+  "tray.setup.doneBody": "Start at logon is on and LAN access is allowed. The share URL is on your clipboard — paste it into the browser on your other machine.\n\nClose this window and an arrow will point at AudioRemote's icon. That icon is how you open it from now on.",
+  "tray.setup.noFirewallBody": "Start at logon is on and the share URL is on your clipboard. LAN access was not allowed, so other machines may not reach this host yet.\n\nClose this window and an arrow will point at AudioRemote's icon. That icon is how you open it from now on.",
+  "tray.setup.noShareBody": "Start at logon is on. There is no share URL to copy yet — LAN access is off, or there is no usable token.\n\nClose this window and an arrow will point at AudioRemote's icon. That icon is how you open it from now on.",
+  "tray.setup.failedBody": "Setup did not finish. Run `audioremote --install-autostart` from a terminal.\n\nAudioRemote itself is running. Close this window and an arrow will point at its icon.",
+  "tray.setup.packagedBody": "The share URL is on your clipboard — paste it into the browser on your other machine.\n\nStart at sign-in and LAN access are both on already in the Store edition (start at sign-in can be switched off in Task Manager → Startup apps).\n\nClose this window and an arrow will point at AudioRemote's icon. That icon is how you open it from now on.",
+  "tray.setup.packagedNoShareBody": "There is no share URL to copy yet — LAN access is off, or there is no usable token.\n\nStart at sign-in and LAN access are both on already in the Store edition.\n\nClose this window and an arrow will point at AudioRemote's icon. That icon is how you open it from now on."
 }

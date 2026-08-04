@@ -25,15 +25,11 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-#[derive(RustEmbed)]
-#[folder = "web/"]
-struct WebAssets;
-
 use crate::about;
+use crate::assets::WebAssets;
 use crate::audio::{self, AudioDevice};
 use crate::auth::AuthState;
 use crate::config::{self, Config, SortPolicy};
@@ -59,6 +55,12 @@ const AUDIO_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 /// request flood spawn an unbounded number of blocking threads.
 const MAX_QUEUED_AUDIO_CALLS: usize = 16;
 
+/// Head start the `202 Accepted` gets before the restart request goes out.
+///
+/// Long enough for a LAN round trip on a wire this app already assumes is
+/// local, short enough that nobody notices the pause.
+const RESTART_GRACE: Duration = Duration::from_millis(300);
+
 #[derive(Clone)]
 pub struct AppState {
     /// Startup snapshot. Everything here needs a restart to change (bind, port,
@@ -72,6 +74,10 @@ pub struct AppState {
     /// AR-02 rebinding guard: allowed `Host` header values, built once at
     /// startup from loopback names + current LAN IPs (see `net::build_allowed_hosts`).
     pub allowed_hosts: Arc<HashSet<String>>,
+    /// Whether a supervisor is watching this process. `POST /api/restart` is
+    /// only answerable when it is — without a parent to start us again, honouring
+    /// the request would take the host offline until somebody walks over to it.
+    pub supervised: bool,
 }
 
 /// Serializes every Core Audio operation and keeps them off the async workers.
@@ -157,6 +163,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/devices", get(devices_handler))
         .route("/api/devices/:id/default", post(set_default_handler))
         .route("/api/volume", get(volume_handler).post(set_volume_handler))
+        .route("/api/restart", post(restart_handler))
         .route("/api/about", get(about_handler))
         .route("/api/languages", get(languages_handler))
         // `route_layer` so an unmatched `/api/...` path skips auth and lands on
@@ -201,6 +208,9 @@ struct StatusBody {
     lan_exposed: bool,
     require_token: bool,
     device_sort: SortPolicy,
+    /// Whether `POST /api/restart` will do anything. The UI hides its restart
+    /// button when this is false rather than offering a button that answers 501.
+    supervised: bool,
     /// LAN URLs with the token pre-embedded in `#t=` — the Web UI shows these
     /// as one-tap-copy in a "connect from another machine" panel. Sorted:
     /// physical NICs first, virtual switches last.
@@ -230,6 +240,7 @@ async fn status_handler(
         lan_exposed: state.config.lan_exposed(),
         require_token: state.auth.require_token(),
         device_sort: state.config.audio.device_sort,
+        supervised: state.supervised,
         // AR-14: hand the token-bearing share URLs only to loopback (the host
         // itself). LAN clients already hold a token and don't need every NIC's
         // URL; withholding them shrinks the token's exposure surface.
@@ -354,6 +365,38 @@ async fn set_volume_handler(
         Ok(Err(e)) => audio_error(e),
         Err(e) => gate_error(e),
     }
+}
+
+/// Ask the supervisor to restart this server, picking up a staged build on the
+/// way through.
+///
+/// This handler never kills its own process. The request goes to the parent and
+/// the parent does the killing, so the only way to end up with no server is for
+/// the parent to fail to start one — which it answers with a rollback. A server
+/// that shut itself down would have no such safety net.
+async fn restart_handler(State(state): State<AppState>) -> Response {
+    if !state.supervised {
+        let body = serde_json::json!({
+            "error": "not_supervised",
+            "message": "this server was started directly (`audioremote serve`), so there is nobody to restart it",
+        });
+        return (StatusCode::NOT_IMPLEMENTED, Json(body)).into_response();
+    }
+
+    // Asked for on a delay, not here. The supervisor kills us as soon as it
+    // reads the marker, and this response has not been written yet — the client
+    // would see a dropped connection and report the restart as failed.
+    #[cfg(windows)]
+    tokio::spawn(async {
+        tokio::time::sleep(RESTART_GRACE).await;
+        crate::supervisor::ask_parent_to_restart();
+    });
+
+    // 202, not 200: the work has been handed off and this process is about to
+    // be killed. The client's real confirmation is the server answering again a
+    // few seconds later.
+    let body = serde_json::json!({ "status": "restarting" });
+    (StatusCode::ACCEPTED, Json(body)).into_response()
 }
 
 async fn about_handler() -> Response {
@@ -1038,6 +1081,9 @@ mod tests {
             history: Arc::new(Mutex::new(History::default())),
             history_path: Arc::new(dir.join("history.toml")),
             allowed_hosts: Arc::new(allowed_hosts.into_iter().collect()),
+            // Matches a bare `audioremote serve`, which is what these tests
+            // model. The supervised path is covered by its own test below.
+            supervised: false,
         }
     }
 
@@ -1063,6 +1109,10 @@ mod tests {
     /// Bind an ephemeral port first, then build the Host allowlist from it — the
     /// real one is assembled at startup from the configured port the same way.
     async fn spawn_test_server() -> SocketAddr {
+        spawn_supervised_test_server(false).await
+    }
+
+    async fn spawn_supervised_test_server(supervised: bool) -> SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind ephemeral port");
@@ -1073,7 +1123,10 @@ mod tests {
             "localhost".to_string(),
             format!("localhost:{}", addr.port()),
         ];
-        let app = build_router(test_state(hosts));
+        let app = build_router(AppState {
+            supervised,
+            ..test_state(hosts)
+        });
         tokio::spawn(async move {
             let _ = axum::serve(
                 listener,
@@ -1163,5 +1216,76 @@ mod tests {
             response.contains("cross-origin request refused"),
             "{response}"
         );
+    }
+
+    /// A POST with the headers a real same-origin browser request carries.
+    fn same_origin_post(addr: SocketAddr, path: &str) -> String {
+        let host = format!("127.0.0.1:{}", addr.port());
+        let mut stream = TcpStream::connect(addr).expect("connect");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("read timeout");
+        let raw = format!(
+            "POST {path} HTTP/1.1\r\nHost: {host}\r\n\
+             Origin: http://{host}\r\nSec-Fetch-Site: same-origin\r\n\
+             Content-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(raw.as_bytes()).expect("write");
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).expect("read");
+        String::from_utf8_lossy(&buf).to_string()
+    }
+
+    #[tokio::test]
+    async fn restart_is_refused_when_nothing_is_supervising() {
+        // `audioremote serve` run by hand. Honouring the request here would end
+        // with no server at all and nobody on the host to notice.
+        let addr = spawn_test_server().await;
+        let response = tokio::task::spawn_blocking(move || same_origin_post(addr, "/api/restart"))
+            .await
+            .expect("join");
+
+        assert!(response.starts_with("HTTP/1.1 501"), "{response}");
+        assert!(response.contains("\"not_supervised\""), "{response}");
+    }
+
+    #[tokio::test]
+    async fn a_supervised_server_accepts_the_restart() {
+        let addr = spawn_supervised_test_server(true).await;
+        let response = tokio::task::spawn_blocking(move || same_origin_post(addr, "/api/restart"))
+            .await
+            .expect("join");
+
+        // 202: handed to the parent, not done yet.
+        assert!(response.starts_with("HTTP/1.1 202"), "{response}");
+        assert!(response.contains("\"restarting\""), "{response}");
+    }
+
+    #[tokio::test]
+    async fn restart_is_behind_the_same_origin_guard() {
+        // The one endpoint that can take the host offline, and loopback skips
+        // the token — so the origin check is the only thing standing between a
+        // random web page and a restart loop.
+        let addr = spawn_supervised_test_server(true).await;
+        let host = format!("127.0.0.1:{}", addr.port());
+        let response = tokio::task::spawn_blocking(move || {
+            let mut stream = TcpStream::connect(addr).expect("connect");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .expect("read timeout");
+            let raw = format!(
+                "POST /api/restart HTTP/1.1\r\nHost: {host}\r\n\
+                 Origin: http://evil.example\r\nSec-Fetch-Site: cross-site\r\n\
+                 Content-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(raw.as_bytes()).expect("write");
+            let mut buf = Vec::new();
+            stream.read_to_end(&mut buf).expect("read");
+            String::from_utf8_lossy(&buf).to_string()
+        })
+        .await
+        .expect("join");
+
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
     }
 }

@@ -15,7 +15,18 @@ homepage = "https://github.com/ishizakahiroshi/audioremote"
 keywords = ["windows", "audio", "core-audio", "remote", "endpoint"]
 categories = ["command-line-utilities", "multimedia::audio", "os::windows-apis"]
 authors = ["Hiroshi Ishizaka (ishizakahiroshi) <ishizakahiroshi.dev@gmail.com>"]
-include = ["src/**", "web/**", "build.rs", "Cargo.toml", "LICENSE", "README.md"]
+# `packaging/audioremote.manifest` and not `packaging/**`: the manifest is
+# required to build a working exe, while the MSIX assets that will join it in
+# that folder are release-time inputs with no business in a crates.io tarball.
+include = [
+    "src/**",
+    "web/**",
+    "build.rs",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+    "packaging/audioremote.manifest",
+]
 
 [[bin]]
 name = "audioremote"
@@ -52,7 +63,40 @@ windows = { version = "0.58", features = [
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
     "Win32_System_Registry",
+    # supervisor.rs: Ctrl+C hook, and the job object that stops a forced kill of
+    # the supervisor from leaving an orphaned server holding the port.
+    # main.rs: AttachConsole, so the CLI subcommands still print once the release
+    # build stops carrying a console of its own.
+    "Win32_System_Console",
+    # main.rs: reopening CONIN$/CONOUT$ after that attach.
+    "Win32_Storage_FileSystem",
+    # autostart.rs: `GetCurrentPackageFullName` answers "am I the MSIX build?",
+    # which decides whether logon startup is ours to install or the package
+    # manifest's to declare.
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_JobObjects",
+    # Pulled in by JobObjects: `CreateJobObjectW` takes SECURITY_ATTRIBUTES and
+    # JOBOBJECT_EXTENDED_LIMIT_INFORMATION lives behind the Threading feature.
+    "Win32_Security",
+    "Win32_System_Threading",
     "Win32_UI_Shell_PropertiesSystem",
+    # autostart.rs: `ShellExecuteExW` with the `runas` verb needs SW_HIDE.
+    # tray.rs: the window class, popup menu and icon decoding all live here.
+    "Win32_UI_WindowsAndMessaging",
+    # Not for drawing: `WNDCLASSW`/`RegisterClassW` carry an `HBRUSH` background,
+    # so windows-rs gates the whole window-class API behind Gdi. Bindings only —
+    # the tray never paints anything.
+    "Win32_Graphics_Gdi",
+    # welcome.rs: TaskDialogIndirect. Needs the comctl32 v6 dependency declared
+    # in packaging/audioremote.manifest — see the note there.
+    "Win32_UI_Controls",
+    # tray.rs: Shell_NotifyIcon lives under Win32_UI_Shell (already pulled in by
+    # the PropertiesSystem feature above); these are the rest of its surface.
+    "Win32_System_LibraryLoader",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    # lang.rs: GetUserDefaultUILanguage picks the tray's language.
+    "Win32_Globalization",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Devices_Properties",
 ] }

@@ -237,6 +237,19 @@ async function setDefault(deviceId) {
   }
 }
 
+/* Ask the host to restart its server. The reply arrives before the process dies
+   (the supervisor does the killing, not the server itself), so a 202 means the
+   request landed — not that the server is back. Polling picks that up on its
+   own; there is nothing here to await. */
+async function restartServer() {
+  try {
+    await api("/api/restart", { method: "POST" });
+    toast(t("toast.restartRequested"));
+  } catch (e) {
+    toast(t("toast.restartFailed", { msg: e.message }), "err");
+  }
+}
+
 function saveToken(tok) {
   state.token = tok.trim();
   localStorage.setItem(TOKEN_KEY, state.token);
@@ -693,6 +706,23 @@ function renderSettingsSheet() {
           },
         }, t("settings.aboutOpen")),
       ),
+      /* Only when a supervisor is there to start it again. Without one the
+         endpoint answers 501, and a button that always fails is worse than no
+         button. */
+      s.supervised
+        ? h("div", { class: "row" },
+            h("div", { class: "label" }, t("settings.restart")),
+            h("button", { class: "btn ghost small",
+              onclick: () => {
+                if (confirm(t("settings.restartConfirm"))) {
+                  state.showSettings = false;
+                  render();
+                  restartServer();
+                }
+              },
+            }, t("settings.restartButton")),
+          )
+        : null,
       // Classes, not inline `style` attributes: the server sends a strict
       // Content-Security-Policy without 'unsafe-inline'.
       h("div", { class: "sheet-actions" },
