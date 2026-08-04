@@ -43,6 +43,8 @@ const TRAY_KEYS: &[&str] = &[
     "tray.welcome.openButton",
     "tray.welcome.openNote",
     "tray.welcome.dontShowAgain",
+    "tray.alreadyRunning.title",
+    "tray.alreadyRunning.body",
     "tray.callout.here",
     "tray.setup.doneTitle",
     "tray.setup.doneBody",

@@ -651,6 +651,76 @@ fn sweep_backups(exe: &Path) {
     }
 }
 
+// ---- single instance --------------------------------------------------------
+
+/// Proof that this process is the supervisor for this logon session. Must stay
+/// alive for as long as the process does; Windows releases it either way when
+/// the process ends, so a crash cannot leave a stale lock behind.
+#[cfg(windows)]
+pub struct InstanceLock(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for InstanceLock {
+    fn drop(&mut self) {
+        let windows::Win32::Foundation::HANDLE(raw) = self.0;
+        if raw.is_null() {
+            return;
+        }
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// Claim the right to be *the* supervisor in this logon session.
+///
+/// `None` means one is already running, and the caller should say so and leave.
+/// Letting a second one start is not harmless: only one process can bind port
+/// 17650, so the newcomer's child dies on every attempt, spends the whole
+/// restart budget finding that out, and settles into `Failed` — leaving a second
+/// notification-area icon that reads "stopped after repeated failures" next to
+/// the one that works. Found on the host on 2026-08-04, where a stray second
+/// launch also made the first V1 measurement read as a failure.
+///
+/// `Local\` rather than `Global\`: the local namespace is per logon session,
+/// which is exactly the scope that matters — audioremote has to run in the
+/// interactive session that owns the audio devices — and the global namespace
+/// needs a privilege a standard user does not have.
+#[cfg(windows)]
+pub fn acquire_instance_lock() -> Option<InstanceLock> {
+    claim(windows::core::w!("Local\\audioremote.supervisor"))
+}
+
+#[cfg(windows)]
+fn claim(name: windows::core::PCWSTR) -> Option<InstanceLock> {
+    use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
+    use windows::Win32::System::Threading::CreateMutexW;
+
+    let handle = match unsafe { CreateMutexW(None, false, name) } {
+        Ok(handle) => handle,
+        // Fail open. Refusing to start because a mutex could not be created
+        // would be a worse fault than the duplicate this exists to prevent.
+        Err(_) => return Some(InstanceLock(HANDLE::default())),
+    };
+    // `CreateMutexW` reports success either way; the last-error code is the only
+    // thing that says somebody got here first.
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        return None;
+    }
+    Some(InstanceLock(handle))
+}
+
+#[cfg(not(windows))]
+pub struct InstanceLock;
+
+#[cfg(not(windows))]
+pub fn acquire_instance_lock() -> Option<InstanceLock> {
+    Some(InstanceLock)
+}
+
 // ---- job object -------------------------------------------------------------
 
 /// A Windows job object that kills its members when the last handle closes.
@@ -810,6 +880,22 @@ mod tests {
         // string nothing else would ever print.
         assert!(RESTART_MARKER.starts_with("__audioremote"));
         assert!(!RESTART_MARKER.contains(char::is_whitespace));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_second_supervisor_is_refused() {
+        // A name of its own. The real one may be held by an audioremote actually
+        // running on this machine, and a test that fails because the product is
+        // working is worse than no test.
+        let name = windows::core::w!("Local\\audioremote.supervisor.test");
+        let first = claim(name).expect("the first claim must succeed");
+        assert!(claim(name).is_none(), "a second claim must be refused");
+        drop(first);
+        assert!(
+            claim(name).is_some(),
+            "the lock must be released when the holder goes away"
+        );
     }
 
     #[test]

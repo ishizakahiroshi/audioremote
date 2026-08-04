@@ -128,6 +128,8 @@
   "tray.welcome.openButton": "AudioRemote を開く",
   "tray.welcome.openNote": "既定のブラウザでこのパソコンの画面を開きます。",
   "tray.welcome.dontShowAgain": "次回から表示しない",
+  "tray.alreadyRunning.title": "AudioRemote はすでに動いています",
+  "tray.alreadyRunning.body": "通知領域（時計の左）に AudioRemote のアイコンがあります。見当たらないときは「∧」を押すと、隠れているアイコンが出てきます。\n\n2 つ目は待受ポートを使えないため何もできません。この画面を閉じると 2 つ目は終了します。1 つ目はそのまま動き続けます。",
 
   "tray.callout.here": "AudioRemote はここにいます",
 

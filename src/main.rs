@@ -464,6 +464,21 @@ fn run_serve(no_open: bool) {
 /// bounded backoff. This is what the logon entry points at from v0.2 on.
 #[cfg(windows)]
 fn run_supervise() {
+    // Before anything else, and before the tray icon exists. Only one process
+    // can bind the port, so a second supervisor's child dies on every attempt
+    // until the restart budget runs out — leaving a dead notification-area icon
+    // beside the working one and no clue why.
+    let _instance = match supervisor::acquire_instance_lock() {
+        Some(lock) => lock,
+        None => {
+            let language = config::load_or_init(&config::default_config_path())
+                .map(|(cfg, _)| cfg.tray.ui_language)
+                .unwrap_or_else(|_| "auto".to_string());
+            welcome::already_running(&lang::Strings::load(&language));
+            return;
+        }
+    };
+
     let (handle, joiner) = match supervisor::start() {
         Ok(v) => v,
         Err(e) => {

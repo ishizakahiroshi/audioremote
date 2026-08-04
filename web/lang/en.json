@@ -128,6 +128,8 @@
   "tray.welcome.openButton": "Open AudioRemote",
   "tray.welcome.openNote": "Opens this host's page in your default browser.",
   "tray.welcome.dontShowAgain": "Don't show this again",
+  "tray.alreadyRunning.title": "AudioRemote is already running",
+  "tray.alreadyRunning.body": "Its icon is in the notification area, to the left of the clock. If you cannot see it, click the \"^\" button to show hidden icons.\n\nA second copy cannot use the listening port, so it can do nothing. Closing this window ends it; the first one keeps running.",
 
   "tray.callout.here": "AudioRemote lives here",
 

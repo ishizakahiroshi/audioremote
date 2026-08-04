@@ -101,6 +101,21 @@ pub fn report(strings: &Strings, body_key: &str) {
     );
 }
 
+/// Tell a second launch that the first one is already there.
+///
+/// A window rather than silence: somebody just double-clicked the app, and an
+/// app that visibly does nothing reads as broken — which is how they end up
+/// double-clicking it again.
+pub fn already_running(strings: &Strings) {
+    show(
+        strings,
+        &strings.get("tray.alreadyRunning.title"),
+        &strings.get("tray.alreadyRunning.body"),
+        None,
+        None,
+    );
+}
+
 /// The one call to `TaskDialogIndirect`. Returns whether the dialog appeared.
 fn show(
     strings: &Strings,
