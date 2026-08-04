@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX package manifest for the Microsoft Store edition of audioremote.
+
+  Identity の 3 値は Partner Center の「製品管理 → 製品 ID」の表示と
+  大文字小文字・空白まで完全一致していなければならない。1 文字でも違うと
+  アップロード時に弾かれる（＝間違ったまま公開されることはない）。
+
+    Publisher / PublisherDisplayName はアカウント単位の値なので、同じ
+    Partner Center アカウントで公開済みの offline-md-editor-viewer と同一。
+    Name だけがアプリ単位で、アプリ名を予約したときに Partner Center が決める。
+    予約後に必ず実値と突き合わせること（子 plan C5-C1 の「App identity」表）。
+
+  {{VERSION}} は build-msix.ps1 が Cargo.toml の version から X.Y.Z.0 へ
+  変換して置換する（4 桁目は Store 予約のため常に 0）。
+
+  これは exe に埋め込む packaging/audioremote.manifest とは別物。あちらは
+  comctl32 v6 と DPI を宣言する Win32 サイドバイサイドマニフェストで、
+  MSIX 版・ポータブル版のどちらの exe にも入っている。
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop desktop2 rescap">
+
+  <Identity
+    Name="ishizakahiroshi.audioremote"
+    Publisher="CN=A454C7F3-0506-42C1-AB41-2BE056B76ABF"
+    Version="{{VERSION}}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>audioremote</DisplayName>
+    <PublisherDisplayName>ishizakahiroshi</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!--
+      audioremote はもともと Windows 11 専用（Core Audio の非公開 COM を叩く）。
+      10.0.22000.0 = Windows 11 21H2 RTM。README の対応 OS 表記と揃えること。
+    -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <!--
+      ここで宣言した言語が、そのまま Partner Center で必須になる Store listing の
+      言語になる。トレイと Web UI が持つ言語パック（web/lang/{en,ja}.json）と一致。
+    -->
+    <Resource Language="en-us" />
+    <Resource Language="ja-jp" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="audioremote.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="audioremote"
+        Description="Switch your Windows 11 host's default audio output device from any browser on the LAN"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <!--
+          Square310x310Logo は指定しない。指定すると Wide310x150Logo も必須になり
+          （MakeAppx error 80080204）、その大タイル自体が Windows 11 では使われない。
+        -->
+        <uap:DefaultTile Square71x71Logo="Assets\Square71x71Logo.png" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <!--
+          MSIX 版のログオン自動起動。パッケージ内から書いた HKCU\...\Run は
+          パッケージコンテナへ仮想化されうるので、autostart.rs の HKCU 経路は
+          MSIX では使わない（src/autostart.rs の `packaged()` 分岐）。
+
+          Executable を引数なしで起動するのが startupTask の仕様。audioremote の
+          既定サブコマンドは `supervise` なので、これでトレイ常駐が立ち上がる。
+
+          Enabled="true" は「初期値は有効」の意味で、以後はタスクマネージャーの
+          「スタートアップ アプリ」から利用者が ON/OFF できる（一度でも
+          切り替えられたら、その選択が manifest より優先される）。
+
+          名前空間は uap5 ではなく desktop。Windows SDK 10.0.26100.0 の
+          UapManifestSchema_v5.xsd / DesktopManifestSchema.xsd を実地で確認したところ
+          StartupTask は**両方に同じ形で存在し、どちらもスキーマ上は妥当**だが、
+          uap5 側は UWP アプリ向けの入口で、full-trust の Win32 exe を
+          `EntryPoint="Windows.FullTrustApplication"` で起こす公式手順は desktop 側。
+          スキーマが通ることと OS がスタートアップ登録することは別なので、
+          検証できない今は文書どおりの方を使う。
+        -->
+        <desktop:Extension
+          Category="windows.startupTask"
+          Executable="audioremote.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask
+            TaskId="AudioRemoteSupervisor"
+            Enabled="true"
+            DisplayName="AudioRemote" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Extensions>
+    <!--
+      LAN からの受信を許可するインバウンド規則。**パッケージ拡張**なので
+      Application の中ではなく Package 直下に置く
+      （AppxManifestTypes.xsd の ST_ExtensionCategory_Desktop2 が
+      windows.firewallRules を "Package Extensions" 側に分類している）。
+
+      ポータブル版と同じ「netsh でプログラムパス指定の規則を足す」手は MSIX では採れない。
+      インストール先が `WindowsApps\<PackageFullName>\` でバージョンごとに変わるため、
+      更新のたびに規則が古い実体を指したまま無言で効かなくなる（「昨日は動いていた」型）。
+      この宣言なら OS がパッケージへ紐づけて登録するので更新後も生き続け、
+      副産物として MSIX 版の初期設定は UAC ゼロになる。
+
+      profile=domainAndPrivate —— public（カフェの Wi-Fi 等）は開けない。
+      ポータブル版の FIREWALL_PROFILES = "private,domain" と同じ方針を維持する。
+
+      **ポートは config.toml の既定 17650 で固定**。manifest は config を読めないので、
+      `audioremote setup` でポートを変えた MSIX 利用者はこの規則の範囲外になる。
+      その場合は手でインバウンド規則を足す必要がある（packaging/msix/README.md に記載）。
+    -->
+    <!--
+      Extension 側に Executable を書かないこと。書くと EntryPoint も必須になり
+      MakeAppx が 80080204 で落ちる（2026-08-04 に実地確認）。対象の exe を指すのは
+      内側の FirewallRules の Executable（スキーマ上 use="required"）。
+    -->
+    <desktop2:Extension Category="windows.firewallRules">
+      <desktop2:FirewallRules Executable="audioremote.exe">
+        <desktop2:Rule
+          Direction="in"
+          IPProtocol="TCP"
+          Profile="domainAndPrivate"
+          LocalPortMin="17650"
+          LocalPortMax="17650" />
+      </desktop2:FirewallRules>
+    </desktop2:Extension>
+  </Extensions>
+
+  <Capabilities>
+    <!--
+      Win32 exe を MSIX で動かすための必須宣言。MakeAppx が要求するので外せず、
+      これがある限り Partner Center は「個人情報を利用する = Yes」を強制する
+      （＝プライバシーポリシー URL が必須になる）。仕様であり回避不能。
+
+      runFullTrust なので AppContainer の外で動く。待受ポートを開くのは
+      この製品の本体だが、UWP の internetClient / privateNetworkClientServer は
+      full-trust 側には適用されないため宣言しない。
+    -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

@@ -1,0 +1,130 @@
+name: Publish to Microsoft Store
+
+# Deliberately separate from release.yml, and deliberately manual-only.
+#
+#   * The Store submission API can only *update* a product that is already
+#     published and live, so the first submission is done by hand in Partner
+#     Center (packaging/msix/SUBMITTING.md). Wiring this to tags before that
+#     exists would fail every release for a reason nobody could act on.
+#   * Publishing here means "handed to certification", not "released". Review is
+#     asynchronous and took about two days for the previous app from this
+#     account, which is a different rhythm from a tag that ships in minutes.
+#   * Until the four secrets below exist, every run of this workflow fails. On a
+#     tag trigger that would be noise attached to an otherwise good release.
+#
+# The four secrets, and what has to happen in Partner Center first:
+#
+#   1. Account settings → Tenants: associate an Entra ID tenant (one can be
+#      created from inside Partner Center; no paid Azure subscription needed)
+#   2. Register an application in Entra ID, then add it under Account settings →
+#      User management → Microsoft Entra applications **with the Manager role**.
+#      Without that role the submission API refuses the token.
+#   3. Store: AZURE_AD_TENANT_ID, AZURE_AD_APPLICATION_CLIENT_ID,
+#      AZURE_AD_APPLICATION_SECRET (shown once, at creation), SELLER_ID
+#      (Account settings → Identifiers → Publisher ID / Seller ID)
+#
+# WACK is not run here: it needs an elevated session. It stays a local step
+# before submission — packaging/msix/run-wack.ps1.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag whose exe should be packaged (e.g. v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-submit-msix:
+    name: Build MSIX from the released exe and submit
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      # The published archive is the single source of truth, exactly as the
+      # winget and npm channels treat it. Rebuilding here would produce a second
+      # binary that nobody has checksummed, for the same version number.
+      - name: Download and verify the released exe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path canonical, target/release | Out-Null
+          gh release download "${{ inputs.tag }}" `
+            --pattern 'audioremote-win32-x64.zip' --pattern 'SHA256SUMS.txt' `
+            --dir canonical --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release download failed" }
+
+          # sha256sum's format: "<hash>  <name>". Compare against the digest the
+          # release itself published rather than recomputing and trusting it.
+          $line = Select-String -Path canonical/SHA256SUMS.txt -Pattern 'audioremote-win32-x64\.zip' |
+            Select-Object -First 1
+          if (-not $line) { throw "SHA256SUMS.txt has no entry for audioremote-win32-x64.zip" }
+          $expected = ($line.Line -split '\s+')[0]
+          $actual = (Get-FileHash canonical/audioremote-win32-x64.zip -Algorithm SHA256).Hash
+          if ($actual -ne $expected.ToUpperInvariant()) {
+            throw "checksum mismatch: expected $expected, got $actual"
+          }
+          Write-Host "SHA256 verified: $actual"
+
+          Expand-Archive canonical/audioremote-win32-x64.zip -DestinationPath target/release -Force
+
+      # Guards against submitting a package whose Identity/Version is one Partner
+      # Center has already seen — it rejects that, but only after the upload.
+      - name: Check the tag matches Cargo.toml
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cargo = (Get-Content Cargo.toml | Select-String '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+          $tag = "${{ inputs.tag }}" -replace '^v', ''
+          if ($cargo -ne $tag) { throw "tag $tag does not match Cargo.toml version $cargo" }
+          Write-Host "Version: $cargo"
+
+      - name: Build the MSIX
+        shell: pwsh
+        run: ./packaging/msix/build-msix.ps1
+
+      # Verified against learn.microsoft.com on 2026-08-04. The name that most
+      # samples still show, `microsoft/setup-msstore-cli`, no longer resolves:
+      # the repository was renamed.
+      - name: Set up the Microsoft Store CLI
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+
+      - name: Configure the Microsoft Store CLI
+        shell: pwsh
+        run: |
+          msstore reconfigure `
+            --tenantId "${{ secrets.AZURE_AD_TENANT_ID }}" `
+            --sellerId "${{ secrets.SELLER_ID }}" `
+            --clientId "${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}" `
+            --clientSecret "${{ secrets.AZURE_AD_APPLICATION_SECRET }}"
+
+      # `msstore publish <path> -id <Store product id>`. There is no
+      # `--productId` option, whatever the older samples say; `-i/--inputFile`
+      # is the one that names a package.
+      #
+      # STORE_PRODUCT_ID is filled in after the first manual submission — see
+      # packaging/msix/SUBMITTING.md. Kept as a repository variable rather than a
+      # secret because it is public information, printed in the listing URL.
+      - name: Publish the MSIX
+        shell: pwsh
+        env:
+          STORE_PRODUCT_ID: ${{ vars.STORE_PRODUCT_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:STORE_PRODUCT_ID) {
+            throw "the STORE_PRODUCT_ID repository variable is not set; the app has to be published once by hand first"
+          }
+          $msix = Get-ChildItem dist/msix -Filter *.msix | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $msix) { throw "no .msix in dist/msix" }
+          Write-Host "Publishing $msix"
+          msstore publish "$msix" -id $env:STORE_PRODUCT_ID
