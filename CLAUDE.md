@@ -35,7 +35,8 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 | MSRV | `rust-version = "1.85"`（lock 済み依存の実効下限。`validate.yml` の MSRV job で固定検証） |
 | 配布（主） | npm レジストリ（Rust exe を optionalDependencies でプラットフォーム別に同梱） |
 | 配布（副） | crates.io（`cargo install audioremote`）／ GitHub Releases（exe + SHA256SUMS・未署名） |
-| 配布（v0.2 で追加予定） | winget ／ Scoop ／ Microsoft Store（ホスト exe の MSIX。Store が再署名するので証明書不要） |
+| 配布（v0.2 で追加） | winget（`ishizakahiroshi.AudioRemote`）／ Scoop（`ishizakahiroshi/scoop-bucket`）。**どちらも GitHub Releases の zip を指すだけで、ビルド経路は増やさない**。マニフェスト原本は `packaging/{winget,scoop}/` |
+| 配布（v0.2 で追加予定） | Microsoft Store（ホスト exe の MSIX。Store が再署名するので証明書不要） |
 
 ## ディレクトリ構成
 
@@ -47,6 +48,7 @@ Windows 11 ホスト（ホスト）の**既定音声出力デバイス**を、�
 - `Cargo.toml` — パッケージ定義（`name = "audioremote"` / `version = "0.1.0"`。crates.io には予約用 `0.0.0` と本リリース `0.1.0` が併存）
 - `docs/local/` — plan / recap / bugfix / pending（**gitignore・非公開**。"local" の名のとおり追跡しない。公開したい開発ドキュメントは `docs/` 直下へ置く）
   - `archive/v0.1.x/` — **v0.1 系（0.1.0 以降）のリリースサイクル全記録**をまとめる箱（release md / 実装計画 / 監査 2 件 / bugfix 3 件）。patch リリースの記録も同じ箱へ入れる
+- `packaging/` — 配布用の原本。`audioremote.manifest`（exe に埋め込む Win32 マニフェスト。**欠けると exe が起動しない**）／ `winget/` ／ `scoop/`。各フォルダの `SUBMITTING.md` が提出手順の正典
 - `scripts/` — `secrets-scan.mjs` / `install-hooks.{sh,ps1}`
 - `.githooks/` — layer 2 pre-commit（`core.hooksPath = .githooks` で有効化）
 - `.github/workflows/` — layer 3 CI (`secrets-scan.yml`)

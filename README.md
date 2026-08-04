@@ -51,14 +51,30 @@ so SmartScreen warnings are avoided.
 [latest release](https://github.com/ishizakahiroshi/audioremote/releases/latest), verify it against
 the published `SHA256SUMS.txt`, and run the extracted `audioremote.exe`.
 
+**winget**:
+
+```powershell
+winget install ishizakahiroshi.AudioRemote
+```
+
+**Scoop**:
+
+```powershell
+scoop bucket add ishizakahiroshi https://github.com/ishizakahiroshi/scoop-bucket
+scoop install ishizakahiroshi/audioremote
+```
+
 **crates.io** (builds from source, needs Rust 1.85+):
 
 ```powershell
 cargo install audioremote
 ```
 
-All three are live as of v0.1.0. The binary is **unsigned** — see Security posture for why the npm
-channel is the recommended path.
+npm, GitHub Releases and crates.io have been live since v0.1.0; winget and Scoop arrive with v0.2.
+Every channel serves the same executable — winget and Scoop unpack the very zip attached to the
+GitHub release and check it against the same `SHA256SUMS.txt`, so there is no separate build to
+distrust. The binary is **unsigned** — see Security posture for why the npm channel is the
+recommended path.
 
 ## Getting started, end to end
 
@@ -140,7 +156,7 @@ POST /api/volume   {"muted": true}
 cannot clobber a level someone changed in Windows a moment earlier. The
 bearer-token, Host-header, allowlist and same-origin checks all apply.
 
-## Start at logon (v0.1 minimal autostart)
+## Start at logon
 
 Register the current executable in the per-user HKCU Run key:
 
@@ -154,21 +170,29 @@ Remove only AudioRemote's own Run value with:
 .\target\release\audioremote.exe --uninstall-autostart
 ```
 
-The registered command is the quoted absolute exe path followed by
-`serve --no-open`, so signing in starts the server without opening a browser.
-This v0.1 form does not add firewall rules, request UAC elevation, or hide the
-console window; a console may remain visible. If the exe is moved, run the
-install command again.
+The registered command is the quoted absolute exe path followed by `supervise`,
+so signing in puts an icon in the notification area and keeps the server alive
+behind it. No console window appears, at logon or otherwise.
+
+Installing also offers to add an inbound firewall rule for the configured port
+on private and domain networks, which needs **one** UAC prompt. Declining costs
+you the rule, not the logon entry — the command reports what to run later from
+an elevated prompt. Uninstalling removes both, and asks for elevation again for
+the firewall half.
+
+If the exe is moved, run the install command again.
 
 ## Roadmap
 
 - **v0.1** — Host server + HTTP API + built-in Web UI, including device switching,
   master volume/mute, and minimal per-user autostart (released 2026-07-31).
-- **v0.2** — Host-side resident UX: tray icon, full autostart (firewall rule,
-  restart and crash recovery), per-app volume, plus winget / Scoop / Microsoft
-  Store distribution. **Nothing new to install on the guest.**
+- **v0.2** — Host-side resident UX: tray icon, no console window, full autostart
+  (firewall rule, restart and crash recovery), remote restart, plus winget /
+  Scoop / Microsoft Store distribution. **Nothing new to install on the guest.**
 - **v0.3+** — Automatic HTTPS provisioning, and a PWA entry point on top of it
   (a PWA needs a secure context, which plain `http://` on a LAN address is not).
+  Per-app volume (the Windows volume mixer, from the guest) also sits here: it
+  only earns its keep when two apps play at once, which this host does not do.
 
 Guests stay on the browser. Open the share URL once and the token is kept in
 `localStorage`, so a bookmark is all you need afterwards. Shipping a native guest
